@@ -1,0 +1,34 @@
+# Documentation files
+*.md
+!README.md
+
+# SMB test server generated files
+smb-test/logs/
+smb-test/shares/*/
+!smb-test/shares/.gitkeep
+
+# Python cache and virtual environments
+__pycache__/
+*.pyc
+*.pyo
+venv/
+smbhound-venv/
+.env
+
+# SMBHound output files
+smb_index_*.txt
+smb_index_*.json
+downloads_*/
+large_files_*.txt
+smbhound_*_*.log
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db

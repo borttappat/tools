@@ -1,0 +1,15 @@
+# SMB Protocol
+impacket>=0.11.0
+
+# File Type Detection
+python-magic>=0.4.27
+
+# Terminal Colors
+colorama>=0.4.6
+
+# Archive Handling
+py7zr>=0.20.0
+
+# Optional: Office Documents
+python-docx>=0.8.11
+openpyxl>=3.1.0
