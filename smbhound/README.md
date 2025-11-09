@@ -1,9 +1,12 @@
 # SMBHound
 ```text
- _______ _______ ______ _______                       __
-|     __|   |   |   __ \   |   |.-----.--.--.-----.--|  |
-|__     |       |   __ <       ||  _  |  |  |     |  _  |
-|_______|__|_|__|______/___|___||_____|_____|__|__|_____|
+ _______ ___ ___ _______  ___ ___                      __
+|   _   |   Y   |   _   \|   Y   .-----.--.--.-----.--|  |
+|   1___|.      |.  1   /|.  1   |  _  |  |  |     |  _  |
+|____   |. \_/  |.  _   \|.  _   |_____|_____|__|__|_____|
+|:  1   |:  |   |:  1    |:  |   |
+|::.. . |::.|:. |::.. .  |::.|:. | v0.1 
+`-------`--- ---`-------'`--- ---' simple smb enumeration tool
 ```
 
 SMBHound is a pentesting tool designed for systematically crawling SMB shares, documenting their structure, and identifying sensitive information such as credentials, secrets, keys, and backup files.
