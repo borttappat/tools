@@ -7,7 +7,7 @@ let
     #!/usr/bin/env bash
     set -e
     
-    echo "🔧 Setting up SMBHound test environment..."
+    echo "Setting up SMBHound test environment..."
     
     # Create persistent directories
     mkdir -p smb-test/{config,shares,logs}
@@ -85,11 +85,11 @@ EOF
     set -e
     
     if [ ! -d "smb-test/shares/PublicShare" ]; then
-      echo "❌ Test environment not set up. Run 'setup-test-files' first."
+      echo "[!] Test environment not set up. Run 'setup-test-files' first."
       exit 1
     fi
     
-    echo "📝 Creating test files with embedded credentials..."
+    echo "[+] Creating test files with embedded credentials..."
     
     BASE_DIR="smb-test/shares/PublicShare"
     
@@ -217,7 +217,7 @@ int main() {
 }
 EOF
 
-      gcc /tmp/test_binary.c -o "$BASE_DIR/binaries/testapp.exe" 2>/dev/null || echo "⚠ gcc not available, skipping binary"
+      gcc /tmp/test_binary.c -o "$BASE_DIR/binaries/testapp.exe" 2>/dev/null || echo "[!] gcc not available, skipping binary"
       rm -f /tmp/test_binary.c
     fi
     
@@ -269,7 +269,7 @@ INSERT INTO api_keys (application, api_key, api_secret, permissions) VALUES
     ('Integration API', 'sk_integration_ghi789jkl012mno345pqr678stu901', 'secret_integration_ghi789', 'read,write');
 EOF
     else
-      echo "⚠ sqlite3 not available, skipping database creation"
+      echo "[!] sqlite3 not available, skipping database creation"
     fi
     
     # Create archive with credentials
@@ -306,7 +306,7 @@ EOF
       cd - >/dev/null
       rm -rf /tmp/archive_content
     else
-      echo "⚠ zip not available, skipping archive creation"
+      echo "[!] zip not available, skipping archive creation"
     fi
     
     # Create admin share files
@@ -387,11 +387,11 @@ EOF
     set -e
     
     if [ ! -f "smb-test/config/smb.conf" ]; then
-      echo "❌ SMB configuration not found. Run 'setup-test-files' first."
+      echo "[!] SMB configuration not found. Run 'setup-test-files' first."
       exit 1
     fi
     
-    echo "🚀 Starting SMB server..."
+    echo "[+] Starting SMB server..."
     echo "Configuration: $(pwd)/smb-test/config/smb.conf"
     echo "Shares: PublicShare (guest), AdminShare (admin), RestrictedShare (restricted)"
     echo ""
@@ -408,12 +408,12 @@ EOF
     #!/usr/bin/env bash
     set -e
     
-    echo "🔍 Testing SMBHound..."
+    echo "[+] Testing SMBHound..."
     echo ""
     
     # Check if SMB server is running
     if ! nc -z 127.0.0.1 445 2>/dev/null; then
-      echo "❌ SMB server not running on port 445"
+      echo "[!] SMB server not running on port 445"
       echo "Start it with: start-smb-server"
       exit 1
     fi
@@ -428,7 +428,7 @@ EOF
     if [ $? -eq 0 ]; then
       echo ""
       echo "✓ Walk phase completed successfully"
-      echo "📋 Index file created: smb_index_127.0.0.1.txt"
+      echo "[+] Index file created: smb_index_127.0.0.1.txt"
       echo ""
       echo "Running SMBHound talk phase..."
       
@@ -437,7 +437,7 @@ EOF
       
       if [ $? -eq 0 ]; then
         echo ""
-        echo "🎉 SMBHound test completed successfully!"
+        echo "[+] SMBHound test completed successfully!"
         echo ""
         echo "Check results:"
         echo "  - Human-readable index: smb_index_127.0.0.1.txt"
@@ -446,10 +446,10 @@ EOF
         echo ""
         echo "Example: cat downloads_127.0.0.1/by_type/ini/RESULTS.txt"
       else
-        echo "❌ Talk phase failed"
+        echo "[!] Talk phase failed"
       fi
     else
-      echo "❌ Walk phase failed"
+      echo "[!] Walk phase failed"
     fi
   '';
 
@@ -495,21 +495,24 @@ pkgs.mkShell {
   ];
 
   shellHook = ''
-    echo "🔍 SMBHound Complete Development Environment"
-    echo "==========================================="
+    echo "SMBHound Complete Development Environment"
+    echo "========================================="
     echo ""
     echo "Setting up Python environment..."
-    
+
+    # Set LD_LIBRARY_PATH for libmagic
+    export LD_LIBRARY_PATH="${pkgs.file}/lib:$LD_LIBRARY_PATH"
+
     # Create venv if it doesn't exist
     if [ ! -d "venv" ]; then
       python3 -m venv venv
       echo "✓ Virtual environment created"
     fi
-    
+
     # Activate venv
     source venv/bin/activate
     echo "✓ Virtual environment activated"
-    
+
     # Install dependencies if needed
     if [ -f "requirements.txt" ] && [ ! -f "venv/.deps_installed" ]; then
       echo "Installing SMBHound dependencies..."
@@ -536,7 +539,7 @@ pkgs.mkShell {
     echo "  python3 smbhound.py walk -t 127.0.0.1 -u guest -p \"\""
     echo "  python3 smbhound.py talk --filetypes txt,ini,xml"
     echo ""
-    echo "Environment ready! 🚀"
+    echo "Environment ready!"
     echo ""
   '';
 }
