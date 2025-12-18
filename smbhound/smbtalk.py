@@ -217,17 +217,24 @@ class SMBTalker:
                 elif selection.lower() == 'all':
                     return list(file_types.keys())
                 else:
-                    # Parse number selection
-                    selected_numbers = [s.strip() for s in selection.split(',')]
+                    # Parse selection - support both numbers and extensions
+                    selections = [s.strip() for s in selection.split(',')]
                     selected_types = []
                     
-                    for num in selected_numbers:
-                        if num in type_options:
-                            selected_types.append(type_options[num])
+                    for sel in selections:
+                        # Check if it's a number
+                        if sel in type_options:
+                            selected_types.append(type_options[sel])
+                        # Check if it's a file extension (with or without dot)
+                        elif sel.lstrip('.') in file_types:
+                            selected_types.append(sel.lstrip('.'))
+                        # Check if it's a file extension WITH dot in file_types
+                        elif sel in file_types:
+                            selected_types.append(sel)
                         else:
-                            print(f"Invalid selection: {num}")
-                            continue
-                    
+                            print(f"Invalid selection: {sel} (not a valid number or extension)")
+                            continue    
+
                     if selected_types:
                         # Show selection summary
                         print(f"\nYou selected:")

@@ -89,7 +89,7 @@ class SMBWalker:
             self.logger.error(f"Failed to enumerate shares: {e}")
             return []
     
-    def get_file_info(self, share_name, file_path):
+    def get_file_info(self, share_name, file_path, smb_file_obj=None):
         """Get file metadata"""
         try:
             # Get file attributes
@@ -114,17 +114,43 @@ class SMBWalker:
                 'modified': modified_iso,
                 'created': created_iso,
                 'accessible': True,
-                'permissions': 'READ'  # Basic assumption, could be enhanced
+                'permissions': 'READ'
             }
             
         except Exception as e:
-            self.logger.debug(f"Cannot get file info for {file_path}: {e}")
+            self.logger.debug(f"queryInfo failed for {file_path}, using listPath metadata: {e}")
+            
+            # Fallback: use metadata from listPath SMB object
+            if smb_file_obj:
+                try:
+                    size = smb_file_obj.get_filesize()
+                    created_time = smb_file_obj.get_ctime_epoch()
+                    modified_time = smb_file_obj.get_mtime_epoch()
+                    
+                    created_iso = datetime.fromtimestamp(created_time, tz=timezone.utc).isoformat() if created_time else None
+                    modified_iso = datetime.fromtimestamp(modified_time, tz=timezone.utc).isoformat() if modified_time else None
+                    
+                    extension = Path(file_path).suffix.lower().lstrip('.')
+                    
+                    return {
+                        'path': f"\\\\{self.target_ip}\\{share_name}\\{file_path}",
+                        'size': size,
+                        'extension': extension,
+                        'modified': modified_iso,
+                        'created': created_iso,
+                        'accessible': True,
+                        'permissions': 'READ'
+                    }
+                except Exception as fallback_error:
+                    self.logger.debug(f"Fallback also failed for {file_path}: {fallback_error}")
+            
+            # If all else fails, mark as inaccessible
             return {
                 'path': f"\\\\{self.target_ip}\\{share_name}\\{file_path}",
                 'size': 0,
                 'extension': Path(file_path).suffix.lower().lstrip('.'),
                 'accessible': False,
-                'reason': 'ACCESS_DENIED'
+                'reason': 'METADATA_UNAVAILABLE'
             }
     
     def convert_time(self, filetime):
@@ -167,8 +193,8 @@ class SMBWalker:
                         self.logger.warning(f"Access denied: \\\\{self.target_ip}\\{share_name}\\{item_path}")
                         self.access_denied["directories"].append(f"\\\\{self.target_ip}\\{share_name}\\{item_path}")
                 else:
-                    # It's a file
-                    file_info = self.get_file_info(share_name, item_path)
+                    # It's a file - pass the SMB object for fallback metadata
+                    file_info = self.get_file_info(share_name, item_path, item)
                     files_found.append(file_info)
                     
                     if file_info['accessible']:
