@@ -41,6 +41,7 @@ class SMBWalker:
         # Statistics
         self.total_files = 0
         self.total_size = 0
+        self.empty_files = 0  # Files with 0 bytes
         self.accessible_shares = 0
         self.denied_shares = 0
         
@@ -195,6 +196,13 @@ class SMBWalker:
                 else:
                     # It's a file - pass the SMB object for fallback metadata
                     file_info = self.get_file_info(share_name, item_path, item)
+                    
+                    # Skip empty files (0 bytes)
+                    if file_info.get('size', 0) == 0:
+                        self.empty_files += 1
+                        self.logger.debug(f"Skipping empty file: {item_path}")
+                        continue
+                    
                     files_found.append(file_info)
                     
                     if file_info['accessible']:
@@ -278,6 +286,7 @@ class SMBWalker:
             f.write(f"User:       {self.username}\n")
             f.write(f"Shares:     {len(self.shares)} found ({self.accessible_shares} accessible, {self.denied_shares} denied)\n")
             f.write(f"Files:      {self.total_files:,} indexed\n")
+            f.write(f"Empty:      {self.empty_files:,} skipped (0 bytes)\n")
             f.write(f"Total Size: {self.format_size(self.total_size)}\n")
             f.write("\n")
             
@@ -321,7 +330,8 @@ class SMBWalker:
                 ext_display = f".{ext}" if ext else "(no extension)"
                 f.write(f"{ext_display:<12} {info['count']:>6} files    {self.format_size(info['total_size']):>10}\n")
             
-            f.write(f"\nTotal: {self.total_files} files across {len(self.file_types)} file types\n\n")
+            f.write(f"\nTotal: {self.total_files} files across {len(self.file_types)} file types\n")
+            f.write(f"Empty files skipped: {self.empty_files:,}\n\n")
             
             # Large files
             if self.large_files:
@@ -406,6 +416,7 @@ class SMBWalker:
                 "accessible_shares": self.accessible_shares,
                 "denied_shares": self.denied_shares,
                 "total_files": self.total_files,
+                "empty_files": self.empty_files,
                 "total_size_bytes": self.total_size,
                 "accessible_files": len([f for f in all_files_list if f['accessible']]),
                 "denied_files": len([f for f in all_files_list if not f['accessible']])
@@ -520,6 +531,7 @@ class SMBWalker:
             self.logger.info("Walk Phase Complete")
             self.logger.info("=" * 50)
             self.logger.info(f"Total files indexed: {self.total_files:,}")
+            self.logger.info(f"Empty files skipped: {self.empty_files:,}")
             self.logger.info(f"Total size: {self.format_size(self.total_size)}")
             self.logger.info(f"Accessible shares: {self.accessible_shares}")
             self.logger.info(f"Denied shares: {self.denied_shares}")
