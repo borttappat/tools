@@ -1,0 +1,258 @@
+#!/usr/bin/env nix-shell
+#!nix-shell -i bash -p python3 pandoc poppler-utils python3Packages.pip python3Packages.openpyxl
+
+# exfil - Universal document extractor for CLI
+# Usage:
+#   exfil <file>          - Extract text from a file
+#   exfil -r <dir>        - Recursively extract from all files in directory
+#   exfil -g <pattern>    - Grep for pattern in all extracted content
+#   exfil -g <p> -r <dir> - Grep pattern recursively
+#   exfil --pst <file>    - Extract PST only (uses pffexport)
+
+set -euo pipefail
+
+# Setup virtualenv with pip packages if not already done
+VENV_DIR="${EXFIL_VENV:-$HOME/.local/share/exfil-venv}"
+EXTRACT_INSTALLED="$VENV_DIR/.extract_installed"
+
+setup_venv() {
+    if [[ ! -d "$VENV_DIR" ]]; then
+        python3 -m venv "$VENV_DIR"
+    fi
+    if [[ ! -f "$EXTRACT_INSTALLED" ]]; then
+        echo "Installing additional extractors into $VENV_DIR (first run only)..." >&2
+        "$VENV_DIR/bin/pip" install --quiet python-pptx 2>/dev/null || true
+        touch "$EXTRACT_INSTALLED"
+    fi
+}
+
+# --- PST extraction via libpff (pffexport) ---
+extract_pst() {
+    local file="$1"
+    if command -v pffexport &>/dev/null; then
+        pffexport "$file" 2>/dev/null || true
+    elif command -v pffexport2 &>/dev/null; then
+        pffexport2 "$file" 2>/dev/null || true
+    else
+        echo "[WARNING] PST support requires libpff (pffexport)" >&2
+        echo "[INFO]    Install with: nix-shell -p libpff" >&2
+        return 1
+    fi
+}
+
+# --- PDF extraction ---
+extract_pdf() {
+    pdftotext -layout "$1" -
+}
+
+# --- DOC/DOCX extraction ---
+extract_docx() {
+    # Try pandoc first (faster, no Python deps)
+    if command -v pandoc &>/dev/null; then
+        pandoc --from=docx --to=plain "$1" 2>/dev/null && return 0
+    fi
+    # Fallback to python-docx
+    python3 -c "
+from docx import Document
+import sys
+doc = Document('$1')
+for para in doc.paragraphs:
+    print(para.text)
+" 2>/dev/null || echo "[ERROR] Could not extract DOCX" >&2
+}
+
+# --- Excel extraction ---
+extract_xlsx() {
+    python3 -c "
+import openpyxl
+wb = openpyxl.load_workbook('$1', data_only=True)
+for sheet_name in wb.sheetnames:
+    print(f'--- SHEET: {sheet_name} ---')
+    ws = wb[sheet_name]
+    for row in ws.iter_rows(values_only=True):
+        print(' | '.join(str(cell) if cell else '' for cell in row))
+" 2>/dev/null || echo "[ERROR] Could not extract XLSX" >&2
+}
+
+extract_csv() {
+    cat "$1"
+}
+
+# --- PowerPoint extraction ---
+extract_pptx() {
+    setup_venv
+    "$VENV_DIR/bin/python" -c "
+from pptx import Presentation
+import sys
+prs = Presentation('$1')
+for slide in prs.slides:
+    print('--- SLIDE ---')
+    for shape in slide.shapes:
+        if hasattr(shape, 'text'):
+            print(shape.text)
+" 2>/dev/null || echo "[ERROR] Could not extract PPTX" >&2
+}
+
+# --- Plain text ---
+extract_txt() {
+    cat "$1"
+}
+
+# --- Generic fallback ---
+extract_generic() {
+    local ext
+    ext=$(get_ext "$1")
+    case "$ext" in
+        txt|md|log|cfg|json|xml|yaml|yml|toml|csv)
+            cat "$1"
+            ;;
+        *)
+            echo "[INFO] Unknown format, trying to read as text..." >&2
+            cat "$1" 2>/dev/null || echo "[ERROR] Could not read file" >&2
+            ;;
+    esac
+}
+
+# Get file extension (lowercase)
+get_ext() {
+    echo "${1##*.}" | tr '[:upper:]' '[:lower:]'
+}
+
+# Main dispatcher
+extract_file() {
+    local file="$1"
+    local ext
+    ext=$(get_ext "$file")
+
+    case "$ext" in
+        pst|ans|uni)       extract_pst "$file" || true ;;
+        pdf)               extract_pdf "$file" ;;
+        doc|docx|odt|rtf)  extract_docx "$file" ;;
+        xls|xlsx|ods)      extract_xlsx "$file" ;;
+        ppt|pptx|odp)      extract_pptx "$file" ;;
+        txt|md|log|cfg|json|xml|yaml|yml|toml|csv)  extract_txt "$file" ;;
+        *)                 extract_generic "$file" ;;
+    esac
+}
+
+# --- Help ---
+usage() {
+    cat <<EOF
+exfil - Universal document extractor for CLI
+
+Usage:
+  exfil <file>           Extract text from a file
+  exfil <file1> <file2>  Extract text from multiple files
+  exfil -r <dir>         Recursively extract from all files
+  exfil -g <pattern>     Grep for pattern (single file)
+  exfil -g <p> -r <dir>  Grep pattern recursively
+  exfil --pst <file>     Extract PST only (uses pffexport)
+
+Examples:
+  exfil document.docx               # Extract text from DOCX
+  exfil report.pdf -g "error"       # Grep PDF for "error"
+  exfil -r ./mail_dump/             # Extract all files recursively
+  exfil -g "invoice" -r ./docs/     # Grep all docs for "invoice"
+  exfil file1.pst file2.pst         # Extract multiple PSTs (if libpff installed)
+
+Supported formats:
+  PST (Outlook) - requires libpff (nix-shell -p libpff)
+  PDF (via pdftotext)
+  DOCX (via pandoc or python-docx)
+  XLSX (via openpyxl)
+  PPTX (via python-pptx)
+  TXT, MD, LOG, JSON, XML, YAML, CSV, CONFIG
+
+EOF
+}
+
+# --- Main entry point ---
+main() {
+    local recursive=false
+    local grep_pattern=""
+    local pst_only=false
+    local files=()
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -h|--help)        usage; exit 0 ;;
+            -r)               recursive=true; shift ;;
+            -g|--grep)        grep_pattern="$2"; shift 2 ;;
+            --pst)            pst_only=true; shift ;;
+            *)                files+=("$1"); shift ;;
+        esac
+    done
+
+    if [[ ${#files[@]} -eq 0 ]]; then
+        usage
+        exit 1
+    fi
+
+    # PST-only mode
+    if $pst_only; then
+        for file in "${files[@]}"; do
+            echo "=== PST: $file ==="
+            extract_pst "$file" || true
+        done
+        return 0
+    fi
+
+    # Grep mode
+    if [[ -n "$grep_pattern" ]]; then
+        for file in "${files[@]}"; do
+            if [[ -d "$file" ]]; then
+                # Recursive grep
+                while IFS= read -r f; do
+                    ext=$(get_ext "$f")
+                    case "$ext" in
+                        pst)
+                            if command -v pffexport &>/dev/null; then
+                                content=$(pffexport "$f" 2>/dev/null || true)
+                                [[ -n "$content" ]] && echo "=== $f ===" && echo "$content" | grep -i "$grep_pattern" || true
+                            fi
+                            ;;
+                        pdf)
+                            content=$(pdftotext "$f" - 2>/dev/null || true)
+                            [[ -n "$content" ]] && echo "=== $f ===" && echo "$content" | grep -i "$grep_pattern" || true
+                            ;;
+                        txt|md|log|cfg|json|xml|yaml|yml|toml)
+                            content=$(cat "$f" 2>/dev/null || true)
+                            [[ -n "$content" ]] && echo "=== $f ===" && echo "$content" | grep -i "$grep_pattern" || true
+                            ;;
+                        docx)
+                            content=$(extract_docx "$f" 2>/dev/null || true)
+                            [[ -n "$content" ]] && echo "=== $f ===" && echo "$content" | grep -i "$grep_pattern" || true
+                            ;;
+                        xlsx)
+                            content=$(extract_xlsx "$f" 2>/dev/null || true)
+                            [[ -n "$content" ]] && echo "=== $f ===" && echo "$content" | grep -i "$grep_pattern" || true
+                            ;;
+                        pptx)
+                            content=$(extract_pptx "$f" 2>/dev/null || true)
+                            [[ -n "$content" ]] && echo "=== $f ===" && echo "$content" | grep -i "$grep_pattern" || true
+                            ;;
+                    esac
+                done < <(find "$file" -type f \( -name "*.pst" -o -name "*.pdf" -o -name "*.doc" -o -name "*.docx" -o -name "*.xls" -o -name "*.xlsx" -o -name "*.ppt" -o -name "*.pptx" -o -name "*.txt" -o -name "*.md" -o -name "*.log" \))
+            else
+                echo "=== $file ==="
+                extract_file "$file" | grep -i "$grep_pattern" || true
+            fi
+        done
+        return 0
+    fi
+
+    # Normal extraction mode
+    for file in "${files[@]}"; do
+        if [[ -d "$file" ]]; then
+            while IFS= read -r f; do
+                echo "=== $f ==="
+                extract_file "$f"
+            done < <(find "$file" -type f \( -name "*.pst" -o -name "*.pdf" -o -name "*.doc" -o -name "*.docx" -o -name "*.xls" -o -name "*.xlsx" -o -name "*.ppt" -o -name "*.pptx" -o -name "*.txt" -o -name "*.md" -o -name "*.log" \))
+        else
+            echo "=== $file ==="
+            extract_file "$file"
+        fi
+    done
+}
+
+main "$@"

@@ -1,0 +1,239 @@
+#!/usr/bin/env nix-shell
+#!nix-shell -i bash -p python3 libpff
+
+# pst-export - Export PST files to structured directory format
+# Usage: pst-export <pst_file> [output_dir]
+
+set -euo pipefail
+
+# Default values
+OUTPUT_DIR="${2:-./pst-export}"
+PST_FILE="${1:-}"
+
+if [[ -z "$PST_FILE" ]] || [[ ! -f "$PST_FILE" ]]; then
+    echo "Usage: pst-export <pst_file> [output_dir]" >&2
+    echo "Example: pst-export mail.pst ./outbox" >&2
+    echo "" >&2
+    echo "This tool exports PST/Outlook files with:" >&2
+    echo "  - emails/          : Email bodies organized by folder structure" >&2
+    echo "  - attachments/     : Files sorted by type (pdf, docx, xlsx, etc.)" >&2
+    echo "  - manifest.txt     : Index of all exported items" >&2
+    exit 1
+fi
+
+# Create output structure
+mkdir -p "$OUTPUT_DIR/emails"
+mkdir -p "$OUTPUT_DIR/attachments/pdf"
+mkdir -p "$OUTPUT_DIR/attachments/doc"
+mkdir -p "$OUTPUT_DIR/attachments/docx"
+mkdir -p "$OUTPUT_DIR/attachments/xlsx"
+mkdir -p "$OUTPUT_DIR/attachments/pptx"
+mkdir -p "$OUTPUT_DIR/attachments/txt"
+mkdir -p "$OUTPUT_DIR/attachments/other"
+
+# Export manifest file
+MANIFEST="$OUTPUT_DIR/manifest.txt"
+echo "PST Export Manifest" > "$MANIFEST"
+echo "===================" >> "$MANIFEST"
+echo "Source: $PST_FILE" >> "$MANIFEST"
+echo "Output: $OUTPUT_DIR" >> "$MANIFEST"
+echo "Date: $(date -Iseconds)" >> "$MANIFEST"
+echo "" >> "$MANIFEST"
+
+# Python script to traverse PST and export
+export OUTPUT_DIR PST_FILE
+python3 << 'PYTHON'
+import sys
+import os
+import re
+import pypff
+
+OUTPUT_DIR = os.environ.get('OUTPUT_DIR', './pst-export')
+PST_FILE = os.environ.get('PST_FILE', '')
+MANIFEST = os.path.join(OUTPUT_DIR, 'manifest.txt')
+
+# Counters for manifest
+email_count = 0
+attachment_count = 0
+
+def sanitize_filename(name):
+    """Sanitize filename for filesystem safety."""
+    if not name:
+        return "unnamed"
+    # Remove/replace invalid characters
+    sanitized = "".join(c for c in name if c not in r'\/:*?"<>|')
+    return sanitized[:255] or "unnamed"
+
+def extract_email_body(entry):
+    """Extract email body, preferring HTML then plain text."""
+    html_body = entry.get_transmission_body_html() or ""
+    body = entry.get_body() or ""
+
+    # If we have HTML, convert to text
+    if html_body:
+        try:
+            # Simple HTML to text conversion
+            html_body = re.sub(r'<br\s*/?>', '\n', html_body, flags=re.IGNORECASE)
+            html_body = re.sub(r'<p[^>]*>', '\n\n', html_body, flags=re.IGNORECASE)
+            html_body = re.sub(r'</(div|p|li)>', '\n', html_body, flags=re.IGNORECASE)
+            html_body = re.sub(r'<[^>]+>', '', html_body)
+            html_body = html_body.replace('&nbsp;', ' ')
+            html_body = html_body.replace('&amp;', '&')
+            html_body = html_body.replace('&lt;', '<')
+            html_body = html_body.replace('&gt;', '>')
+            html_body = html_body.replace('&quot;', '"')
+            return html_body.strip()
+        except:
+            pass
+
+    # Fall back to plain body
+    return body.strip() if body else ""
+
+def process_email(entry, folder_path):
+    """Process a single email entry and export it."""
+    global email_count, attachment_count
+
+    subject = entry.get_subject() or "No Subject"
+    sender = entry.get_sender_address() or "Unknown"
+    receiver = entry.get_receiver_address() or ""
+    received_time = entry.get_received_time() or ""
+
+    # Clean up addresses
+    sender = sender.replace('<', '').replace('>', '').strip()
+    receiver = receiver.replace('<', '').replace('>', '').strip()
+
+    body = extract_email_body(entry)
+
+    # Create sanitized filename
+    safe_subject = sanitize_filename(subject[:50])
+    timestamp = received_time.replace(':', '-').replace(' ', '_')[:20] if received_time else ""
+    email_filename = f"{timestamp}_{safe_subject}.eml"
+    email_base = email_filename.replace('.eml', '')
+
+    # Create email file
+    email_path = os.path.join(OUTPUT_DIR, 'emails', folder_path)
+    os.makedirs(email_path, exist_ok=True)
+
+    email_file = os.path.join(email_path, email_filename)
+    with open(email_file, 'w', encoding='utf-8') as f:
+        f.write(f"From: {sender}\n")
+        f.write(f"To: {receiver}\n")
+        f.write(f"Subject: {subject}\n")
+        if received_time:
+            f.write(f"Date: {received_time}\n")
+        f.write(f"Source Folder: {folder_path}\n")
+        f.write("-" * 60 + "\n\n")
+        f.write(body)
+
+    print(f"[EMAIL] {folder_path}/{email_filename}")
+    email_count += 1
+
+    # Add to manifest
+    with open(MANIFEST, 'a') as mf:
+        mf.write(f"[EMAIL] {folder_path}/{email_filename}\n")
+        mf.write(f"  Subject: {subject}\n")
+        mf.write(f"  From: {sender}\n")
+        if received_time:
+            mf.write(f"  Date: {received_time}\n")
+
+    # Process attachments
+    for i in range(entry.number_of_sub_items):
+        try:
+            sub = entry.get_sub_item(i)
+            if sub.message_class == "IPM.Attachment":
+                att_name = sub.get_name() or "attachment"
+                att_data = sub.get_data()
+                att_size = sub.get_data_size() if hasattr(sub, 'get_data_size') else len(att_data) if att_data else 0
+
+                if att_data and len(att_data) > 0:
+                    # Determine attachment type
+                    att_name_lower = att_name.lower()
+                    if att_name_lower.endswith('.pdf'):
+                        att_folder = 'pdf'
+                    elif att_name_lower.endswith('.doc'):
+                        att_folder = 'doc'
+                    elif att_name_lower.endswith('.docx'):
+                        att_folder = 'docx'
+                    elif att_name_lower.endswith('.xlsx'):
+                        att_folder = 'xlsx'
+                    elif att_name_lower.endswith('.pptx'):
+                        att_folder = 'pptx'
+                    elif att_name_lower.endswith(('.txt', '.md', '.log')):
+                        att_folder = 'txt'
+                    else:
+                        att_folder = 'other'
+
+                    att_dir = os.path.join(OUTPUT_DIR, 'attachments', att_folder)
+                    os.makedirs(att_dir, exist_ok=True)
+
+                    safe_att_name = sanitize_filename(att_name)
+                    att_path = os.path.join(att_dir, f"{email_base}__{safe_att_name}")
+
+                    with open(att_path, 'wb') as af:
+                        af.write(att_data)
+
+                    print(f"  [ATTACHMENT] {att_folder}/{safe_att_name}")
+                    attachment_count += 1
+
+                    # Add to manifest
+                    with open(MANIFEST, 'a') as mf:
+                        mf.write(f"  [ATTACH] {att_folder}/{safe_att_name}\n")
+        except Exception as e:
+            print(f"    Warning: Could not process attachment: {e}", file=sys.stderr)
+
+def traverse_folder(entry, folder_path=""):
+    """Recursively traverse PST folders and process emails."""
+    current_path = f"{folder_path}/{entry.get_name()}" if folder_path else entry.get_name()
+
+    is_folder = entry.get_contains_folders()
+    is_messages = entry.get_contains_messages()
+
+    if is_messages and not is_folder:
+        # Process emails in this folder
+        for i in range(entry.number_of_sub_items):
+            try:
+                sub = entry.get_sub_item(i)
+                if sub.message_class == "IPM.Note":  # Email message
+                    process_email(sub, current_path)
+            except Exception as e:
+                print(f"  Warning: Could not process item: {e}", file=sys.stderr)
+
+    if is_folder:
+        # Recurse into subfolders
+        for i in range(entry.number_of_sub_items):
+            try:
+                sub = entry.get_sub_item(i)
+                traverse_folder(sub, current_path)
+            except Exception as e:
+                print(f"  Warning: Could not traverse folder: {e}", file=sys.stderr)
+
+def main():
+    pff_file = pypff.file()
+    try:
+        print(f"Opening PST: {PST_FILE}")
+        pff_file.open(PST_FILE)
+
+        root = pff_file.root_entity
+        print(f"Root folder: {root.get_name()}")
+        print("")
+
+        # Start traversal from root
+        traverse_folder(root)
+
+        # Finalize manifest
+        with open(MANIFEST, 'a') as mf:
+            mf.write(f"\n===================\n")
+            mf.write(f"Total emails: {email_count}\n")
+            mf.write(f"Total attachments: {attachment_count}\n")
+
+        print(f"\nExport complete.")
+        print(f"  Emails: {email_count}")
+        print(f"  Attachments: {attachment_count}")
+        print(f"  Output directory: {OUTPUT_DIR}")
+
+    finally:
+        pff_file.close()
+
+if __name__ == "__main__":
+    main()
+PYTHON
