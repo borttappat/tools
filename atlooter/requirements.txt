@@ -1,0 +1,20 @@
+# Atlassian API client
+atlassian==1.43.0
+
+# HTTP requests
+requests==2.32.3
+
+# Configuration parsing
+pyyaml==6.0.1
+
+# Timestamp handling
+python-dateutil==2.9.0.post0
+
+# Progress bars
+tqdm==4.66.4
+
+# Environment variable management
+python-dotenv==1.0.1
+
+# JSON handling (standard library preferred, but rich-json for pretty output)
+rich==13.7.1

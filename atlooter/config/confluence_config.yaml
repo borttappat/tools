@@ -1,0 +1,49 @@
+# Confluence Cloud Configuration
+# Copy this file to config/confluence_config.local.yaml and fill in your values
+
+confluence:
+  # Connection settings
+  url: "${CONFLUENCE_URL}"           # e.g., https://your-domain.atlassian.net
+  email: "${CONFLUENCE_EMAIL}"        # Your Atlassian account email
+  token: "${CONFLUENCE_TOKEN}"        # API token (create at https://id.atlassian.com/manage-profile/security/api-tokens)
+
+  # Collection settings
+  collection:
+    # Spaces to collect (leave empty to collect all accessible spaces)
+    space_keys: []                    # e.g., ["DEMO", "DOC"]
+
+    # Date range filtering (optional)
+    # date_from: "2024-01-01"
+    # date_to: "2024-12-31"
+
+    # Content types to collect
+    content_types:
+      - "page"
+      - "blogpost"
+
+    # Enable/disable specific collectors
+    collectors:
+      pages: true
+      versions: true
+      comments: true
+      restrictions: true
+      attachments: true
+      attachment_versions: true
+      labels: true
+      metadata: true
+      spaces: true
+      templates: true
+      audit_log: true
+
+  # Output settings
+  output:
+    directory: "output/confluence"
+    format: "json"                    # json or yaml
+    include_raw_response: true        # Keep full API response for forensics
+    include_request_metadata: true    # Track request timestamps/headers
+
+  # Rate limiting
+  rate_limit:
+    max_retries: 5
+    backoff_factor: 2                 # Exponential backoff multiplier
+    max_per_minute: 800               # Stay under API limits

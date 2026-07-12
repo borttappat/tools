@@ -1,0 +1,64 @@
+# Jira Cloud Configuration
+# Copy this file to config/jira_config.local.yaml and fill in your values
+
+jira:
+  # Connection settings
+  url: "${JIRA_URL}"                  # e.g., https://your-domain.atlassian.net
+  email: "${JIRA_EMAIL}"              # Your Atlassian account email
+  token: "${JIRA_TOKEN}"              # API token (create at https://id.atlassian.com/manage-profile/security/api-tokens)
+
+  # Collection settings
+  collection:
+    # Projects to collect (leave empty to collect all accessible projects)
+    project_keys: []                  # e.g., ["PROJ1", "PROJ2"]
+
+    # JQL query for issue filtering (optional)
+    # jql: "project = PROJ AND created >= '2024-01-01'"
+
+    # Date range filtering (optional)
+    # date_from: "2024-01-01"
+    # date_to: "2024-12-31"
+
+    # Enable/disable specific collectors
+    collectors:
+      # Issue data
+      issues: true
+      comments: true
+      changelog: true
+      worklogs: true
+      # Link data
+      links: true           # Issue-to-issue links
+      remote_links: true    # Links to external resources / Confluence pages
+      # Attachments
+      attachments: true
+      # Project structure
+      project_meta: true    # Versions, components, roles, permission scheme
+      sprints: true
+      epics: true
+      boards: true
+      # People
+      watchers: true        # Who is watching each issue
+      users: true
+      # Instance-wide
+      audit_log: true
+      fields: true          # Custom field definitions
+      priorities: true
+      statuses: true
+
+    # Fields to include (empty = all fields)
+    # custom_fields:
+    #   - "customfield_10001"
+    #   - "customfield_10002"
+
+  # Output settings
+  output:
+    directory: "output/jira"
+    format: "json"                    # json or yaml
+    include_raw_response: true        # Keep full API response for forensics
+    include_request_metadata: true    # Track request timestamps/headers
+
+  # Rate limiting
+  rate_limit:
+    max_retries: 5
+    backoff_factor: 2                 # Exponential backoff multiplier
+    max_per_minute: 400               # Stay under API limits
