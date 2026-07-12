@@ -1,6 +1,6 @@
 # tools
 
-Personal security and forensics tooling.
+Personal security and tooling.
 
 ---
 
@@ -23,6 +23,26 @@ python3 tango.py local-talk /mnt/dump --filetypes pdf,docx,xlsx,txt
 ```
 
 See `tango/README.md` for full usage.
+
+---
+
+## atlooter
+
+Data collector for Atlassian Confluence Cloud and Jira Cloud.
+
+Pulls pages, issues, comments, attachments, audit logs, and permissions via the
+Atlassian REST APIs. All output is JSON with metadata wrapping for
+integrity.
+
+```bash
+cd atlooter && nix-shell
+
+python scripts/run_confluence.py --spaces DEMO DOC
+python scripts/run_jira.py --projects PROJ1 PROJ2
+python scripts/run_jira.py --jql "project = PROJ AND created >= '2024-01-01'"
+```
+
+See `atlooter/README.md` for full usage.
 
 ---
 
