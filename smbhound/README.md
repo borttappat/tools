@@ -1,178 +1,163 @@
-# SMBHound
-```text
- _______ ___ ___ _______  ___ ___                      __
-|   _   |   Y   |   _   \|   Y   .-----.--.--.-----.--|  |
-|   1___|.      |.  1   /|.  1   |  _  |  |  |     |  _  |
-|____   |. \_/  |.  _   \|.  _   |_____|_____|__|__|_____|
-|:  1   |:  |   |:  1    |:  |   |
-|::.. . |::.|:. |::.. .  |::.|:. | v0.1 
-`-------`--- ---`-------'`--- ---' simple smb enumeration tool
+# Tango
+
+```
+ _______  _______   __    _  _______  _______ 
+|       ||   _   ||  |  | ||       ||       |
+|_     _||  |_|  ||   |_| ||    ___||   _   |
+  |   |  |       ||       ||   | __ |  | |  |
+  |   |  |       ||  _    ||   ||  ||  |_|  |
+  |   |  |   _   || | |   ||   |_| ||       |
+  |___|  |__| |__||_|  |__||_______||_______|
+
+  file share reconnaissance and analysis tool
 ```
 
-SMBHound is a pentesting tool designed for systematically crawling SMB shares, documenting their structure, and identifying sensitive information such as credentials, secrets, keys, and backup files.
+Tango crawls file shares, indexes their contents, and searches for sensitive
+information such as credentials, secrets, API keys, and configuration data.
 
-## Features
+It supports two source types:
 
-- **Two-Phase Architecture**: Walk (index) and Talk (analyze) phases
-- **Comprehensive File Support**: Text files, binaries, archives, Office documents, databases
-- **Intelligent Search**: Keyword-based search with context highlighting
-- **Resume Capability**: Continue interrupted downloads
-- **Multiple Output Formats**: Human-readable and machine-readable reports
-- **Size Management**: Configurable file size limits with override options
+- **SMB shares** - authenticate and enumerate remote Windows/Samba shares
+- **Local directories** - analyze file server dumps on disk (no authentication)
 
-## Installation & Setup
+Rich document formats (PDF, Word, Excel, PowerPoint) are parsed via Apache Tika.
 
-### Method 1: Using Nix (Recommended)
+---
 
-SMBHound includes a complete Nix development environment that provides all dependencies and tools:
+## Installation
+
+### Nix (recommended)
 
 ```bash
-# Clone and enter the SMBHound directory
-cd smbhound
-
-# Enter the Nix development environment
+cd tango
 nix-shell
-
-# The environment will automatically:
-# - Create a Python virtual environment (./venv/)
-# - Install all Python dependencies
-# - Provide SMB server tools for testing
-# - Include file creation utilities (gcc, sqlite, zip, etc.)
-
-# Follow the quick start instructions shown in the shell
 ```
 
-**Benefits of using Nix:**
-- Completely isolated environment
-- Reproducible builds across different systems
-- No impact on your system's global packages
-- Automatic dependency management
-- Includes test SMB server setup
+The shell hook creates a Python venv, installs all dependencies, and exports
+`JAVA_HOME` so Tika can start its server process.
 
-### Method 2: Manual Installation
-
-If you don't have Nix, you can install dependencies manually:
+### Manual
 
 ```bash
-# Create virtual environment
 python3 -m venv venv
 source venv/bin/activate
-
-# Install Python dependencies
 pip install -r requirements.txt
 
-# Install system dependencies
-# Debian/Ubuntu:
-sudo apt install binutils libmagic1 samba sqlite3
+# System packages (Debian/Ubuntu)
+sudo apt install binutils libmagic1 default-jre
 
-# macOS:
-brew install libmagic samba sqlite3
-
-# Arch Linux:
-sudo pacman -S binutils file samba sqlite
+# System packages (Arch)
+sudo pacman -S binutils file jre-openjdk
 ```
 
-### Setting Up Test Environment (Optional)
+> Tika downloads its server JAR (~60 MB) on first use. Java 8+ must be in PATH.
 
-To test SMBHound locally, you can set up a minimal SMB server:
+---
+
+## Usage
+
+### SMB mode
+
+Index an SMB share, then search the downloaded files:
 
 ```bash
-# In nix-shell environment:
-./setup-test-smb.sh
+# Phase 1: walk (index shares and file metadata)
+python3 tango.py walk -t 10.0.0.5 -u admin -p 'P@ssw0rd' -d CORP
 
-# Start the test SMB server (in one terminal):
-smbd -F -S -s ./smb-test/config/smb.conf
+# Phase 2: talk (download selected file types and search for keywords)
+python3 tango.py talk --filetypes txt,ini,xml,cfg
+python3 tango.py talk --filetypes pdf,docx,xlsx        # Tika extraction
+python3 tango.py talk --filetypes txt --keywords-inline "password,secret,token"
 
-# Test SMBHound (in another terminal):
-python3 smbhound.py walk -t 127.0.0.1:1445 -u guest -p ''
-python3 smbhound.py talk --filetypes txt,ini,xml
+# Auto-detect: runs walk if no index exists, talk if it does
+python3 tango.py -t 10.0.0.5 -u admin -p 'P@ssw0rd'
+
+# Combined: walk then talk in one go
+python3 tango.py -t 10.0.0.5 -u admin -p 'P@ssw0rd' --filetypes txt,ini,pdf
 ```
 
-### Basic Usage
+Optional SMB flags:
+
+| Flag | Description |
+|------|-------------|
+| `-d DOMAIN` | Domain name (default: WORKGROUP) |
+| `--dc-ip IP` | Domain controller IP |
+| `--override-filesize N` | Override 50 MB per-file limit (MB or "unlimited") |
+
+### Local mode
+
+Analyze a directory dump without any authentication:
 
 ```bash
-# Auto-detect phase (walk if no index, talk if index exists)
-./smbhound.py -t 10.0.0.5 -u admin -p password
+# Phase 1: index the directory tree
+python3 tango.py local-walk /mnt/fileserver/dump
 
-# Explicit walk phase (indexing)
-./smbhound.py walk -t 10.0.0.5 -u admin -p password
-
-# Explicit talk phase (analysis)
-./smbhound.py talk --filetypes txt,ini,xml
-
-# Combined mode
-./smbhound.py -t 10.0.0.5 -u admin -p password --filetypes txt,ini --keywords keywords.txt
+# Phase 2: search indexed files for keywords
+python3 tango.py local-talk /mnt/fileserver/dump --filetypes pdf,docx,xlsx,txt
+python3 tango.py local-talk /mnt/fileserver/dump --keywords keywords.txt
+python3 tango.py local-talk /mnt/fileserver/dump --keywords-inline "password,secret"
 ```
 
-## Architecture
+The `local-walk` and `local-talk` commands are independent - run walk first to
+see what file types exist and how large they are, then pick what to search.
 
-### Walk Phase (`smbwalk.py`)
-- Connects to SMB server
-- Enumerates all shares and files
-- Generates comprehensive index files
-- Identifies large files requiring manual review
+---
 
-### Talk Phase (`smbtalk.py`)
-- Downloads selected file types
-- Searches for sensitive keywords
-- Supports various file formats (text, binary, archives, Office docs)
-- Generates detailed results with context
+## Output files
 
-## Output Files
+### SMB mode
 
-- `smb_index_<target>.txt` - Human-readable index
-- `smb_index_<target>.json` - Machine-readable index
-- `downloads_<target>/` - Downloaded files organized by type and share
-- `downloads_<target>/by_type/*/RESULTS.txt` - Keyword search results
-- `large_files_<target>.txt` - Large files requiring manual review
-- `smbhound_<target>_<timestamp>.log` - Detailed execution log
+| File | Contents |
+|------|----------|
+| `smb_index_<ip>.txt` | Human-readable share index |
+| `smb_index_<ip>.json` | Machine-readable index (used by talk phase) |
+| `large_files_<ip>.txt` | Files over 50 MB, flagged for manual review |
+| `downloads_<ip>/by_type/<ext>/RESULTS.txt` | Keyword matches per file type |
+| `tango_<ip>_<timestamp>.log` | Full session log |
 
-## Examples
+### Local mode
 
-### Pentest Workflow
-```bash
-# 1. Index the target
-./smbhound.py walk -t 10.0.0.5 -u admin -p 'P@ssw0rd' -d CORP
+| File | Contents |
+|------|----------|
+| `local_index_<name>.txt` | Human-readable directory index |
+| `local_index_<name>.json` | Machine-readable index (used by local-talk) |
+| `local_results_<name>/by_type/<ext>/RESULTS.txt` | Keyword matches per file type |
+| `tango_<name>_<timestamp>.log` | Full session log |
 
-# 2. Review file types
-cat smb_index_10.0.0.5.txt
+---
 
-# 3. Download and search config files
-./smbhound.py talk --filetypes txt,ini,xml,cfg
+## File type handling
 
-# 4. Review findings
-cat downloads_10.0.0.5/by_type/ini/RESULTS.txt
+| Category | Extensions | Method |
+|----------|------------|--------|
+| Rich documents | pdf, doc, docx, xls, xlsx, ppt, pptx, odt, ods, odp, rtf, eml, msg | Apache Tika |
+| Plain text | txt, ini, cfg, conf, log, xml, json, yaml, yml, env, toml, sql, py, sh, ps1, ... | Direct read |
+| Archives | zip | Extract to temp dir, recurse |
+| Binaries | exe, dll, msi, bin, so | `strings` command |
+| Unknown | anything else | Attempt plain text read |
+
+---
+
+## Keywords
+
+The default keyword set covers common credential patterns:
+
+```
+password, passwd, pass, pwd, secret, credential, cred,
+api_key, apikey, private_key, ssh_key, access_key, secret_key,
+key, token, bearer, auth, username, user, account,
+admin, administrator, root,
+database, db, connection, connectionstring, dsn, jdbc,
+cert, certificate, pem, pfx, p12
 ```
 
-### Advanced Usage
-```bash
-# Large files override
-./smbhound.py talk --filetypes bak --override-filesize 100
+Supply your own with `--keywords <file>` or `--keywords-inline a,b,c`.
 
-# Custom keywords
-./smbhound.py talk --filetypes txt --keywords-inline "company,internal,secret"
-
-# Resume interrupted session
-./smbhound.py talk  # Auto-resumes if previous session detected
-```
-
-## File Type Support
-
-SMBHound supports analysis of the following file types:
-
-**Text Files**: txt, ini, xml, cfg, conf, log, json, yaml, yml, properties, env
-**Database Files**: sql, db, sqlite, sqlite3, mdb
-**Backup Files**: bak, backup, old, orig
-**Archive Files**: zip, 7z, tar, gz, bz2, rar
-**Office Documents**: docx, xlsx, pptx, doc, xls, ppt
-**Scripts**: py, sh, bat, ps1, vbs, js
-**Configuration**: config, settings, htaccess, gitignore
+---
 
 ## Requirements
 
-- Python 3.6+
-- impacket >= 0.11.0
-- python-magic >= 0.4.27
-- colorama >= 0.4.6
-- System: `strings` command (binutils package)
-
+- Python 3.8+
+- Java 8+ (for Apache Tika)
+- `strings` command from binutils (binary analysis)
+- See `requirements.txt` for Python packages
