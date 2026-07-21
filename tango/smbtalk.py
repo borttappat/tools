@@ -19,6 +19,7 @@ import magic
 
 from logger import create_logger
 from text_extractor import extract_text, TIKA_EXTENSIONS
+import keywords as kwmod
 
 # Extensions handled by Tika (rich document formats)
 RICH_DOC_EXTENSIONS = TIKA_EXTENSIONS
@@ -26,7 +27,7 @@ RICH_DOC_EXTENSIONS = TIKA_EXTENSIONS
 
 class SMBTalker:
     def __init__(self, target_ip=None, filetypes=None, keywords_file=None,
-                 keywords_inline=None, override_filesize=None):
+                 keywords_inline=None, override_filesize=None, keywords_saved=False):
         if target_ip is None:
             target_ip = self.detect_target_from_index()
 
@@ -35,7 +36,8 @@ class SMBTalker:
         self.start_time = time.time()
 
         self.selected_filetypes = self.parse_filetypes(filetypes) if filetypes else None
-        self.keywords = self.parse_keywords(keywords_file, keywords_inline)
+        self.keywords = self.parse_keywords(keywords_file, keywords_inline) if (keywords_file or keywords_inline) else []
+        self.keywords_saved = keywords_saved
         self.max_filesize = self.parse_filesize_limit(override_filesize)
 
         self.index_data = None
@@ -69,41 +71,18 @@ class SMBTalker:
         return [ft.strip().lower() for ft in filetypes_str.split(',')]
 
     def parse_keywords(self, keywords_file, keywords_inline):
-        default_keywords = [
-            'password', 'passwd', 'pass', 'pwd',
-            'secret', 'credential', 'cred',
-            'api_key', 'apikey', 'api-key',
-            'private_key', 'privatekey', 'private-key',
-            'ssh_key', 'sshkey', 'ssh-key',
-            'access_key', 'accesskey', 'access-key',
-            'secret_key', 'secretkey', 'secret-key',
-            'key', 'token', 'bearer', 'auth', 'authentication',
-            'username', 'user', 'account',
-            'admin', 'administrator', 'root',
-            'database', 'db', 'connection', 'connectionstring',
-            'dsn', 'jdbc', 'cert', 'certificate', 'pem', 'pfx', 'p12'
-        ]
-
-        keywords = []
         if keywords_file:
             try:
-                with open(keywords_file, 'r') as f:
-                    keywords = [line.strip().lower() for line in f if line.strip()]
+                keywords = kwmod.parse_keywords_file(keywords_file)
             except FileNotFoundError:
                 self.logger.error(f"Keywords file not found: {keywords_file}")
-                keywords = default_keywords
+                keywords = kwmod.DEFAULT_KEYWORDS
         elif keywords_inline:
             keywords = [kw.strip().lower() for kw in keywords_inline.split(',')]
         else:
-            keywords = default_keywords
+            keywords = kwmod.DEFAULT_KEYWORDS
 
-        seen = set()
-        unique = []
-        for kw in keywords:
-            if kw not in seen:
-                seen.add(kw)
-                unique.append(kw)
-        return unique
+        return kwmod.dedupe(keywords)
 
     def parse_filesize_limit(self, override_str):
         if not override_str:
@@ -239,51 +218,21 @@ class SMBTalker:
                 continue
 
     def interactive_keyword_input(self):
-        """Interactive keyword input if not specified"""
+        """Interactive keyword input, or use --keywords / --keywords-inline / --keywords-saved."""
         if self.keywords:
             return self.keywords
 
-        print("\n" + "=" * 80)
-        print("Keyword Search Configuration")
-        print("=" * 80)
-        print("\nOptions:")
-        print("  1. Enter keywords manually (comma-separated)")
-        print("  2. Load keywords from file")
-        print("  3. Use default keyword set (recommended)")
-
-        while True:
-            try:
-                choice = input("\nYour choice [1/2/3]: ").strip()
-
-                if choice == '1':
-                    keywords_input = input("Enter keywords (comma-separated): ").strip()
-                    if keywords_input:
-                        return [kw.strip().lower() for kw in keywords_input.split(',')]
-
-                elif choice == '2':
-                    file_path = input("Enter keywords file path: ").strip()
-                    try:
-                        with open(file_path, 'r') as f:
-                            return [line.strip().lower() for line in f if line.strip()]
-                    except FileNotFoundError:
-                        print(f"File not found: {file_path}")
-                        continue
-
-                elif choice == '3':
-                    default_keywords = self.parse_keywords(None, None)
-                    print(f"\nUsing {len(default_keywords)} default keywords.")
-                    additional = input("Add extra keywords (comma-separated, or Enter to continue): ").strip()
-                    if additional:
-                        default_keywords.extend([kw.strip().lower() for kw in additional.split(',')])
-                    confirm = input("Proceed? [Y/n]: ").strip().lower()
-                    if confirm in ['', 'y', 'yes']:
-                        return default_keywords
-                else:
-                    print("Invalid choice. Please enter 1, 2, or 3.")
-
-            except KeyboardInterrupt:
-                print("\nAborted.")
+        if self.keywords_saved:
+            loaded = kwmod.load_saved_keywords('smb', self.target_ip)
+            if loaded is None:
+                self.logger.error(
+                    f"No saved keyword list found at {kwmod.saved_keywords_path('smb', self.target_ip)}. "
+                    f"Run without --keywords-saved once to create one."
+                )
                 return []
+            return loaded
+
+        return kwmod.interactive_keyword_menu('smb', self.target_ip, self.logger)
 
     def create_output_structure(self):
         """Create output directory structure"""

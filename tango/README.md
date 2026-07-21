@@ -144,14 +144,34 @@ The default keyword set covers common credential patterns:
 
 ```
 password, passwd, pass, pwd, secret, credential, cred,
-api_key, apikey, private_key, ssh_key, access_key, secret_key,
-key, token, bearer, auth, username, user, account,
-admin, administrator, root,
+api_key, apikey, api-key, private_key, privatekey, private-key,
+ssh_key, sshkey, ssh-key, access_key, accesskey, access-key,
+secret_key, secretkey, secret-key, key, token, bearer, auth,
+authentication, username, user, account, admin, administrator, root,
 database, db, connection, connectionstring, dsn, jdbc,
 cert, certificate, pem, pfx, p12
 ```
 
-Supply your own with `--keywords <file>` or `--keywords-inline a,b,c`.
+Supply your own non-interactively with `--keywords <file>` or `--keywords-inline a,b,c`.
+
+If neither flag is given, `talk`/`local-talk` show an interactive menu:
+
+1. Use the default keyword set as-is
+2. Use the default set plus extra keywords you type in
+3. Enter custom keywords manually (only those — no defaults mixed in)
+4. Load keywords from a file (only those — no defaults mixed in)
+5. Use the saved list for this investigation, if one exists
+6. Manage the saved list (view / add / remove / reset to defaults)
+
+Whatever list you settle on, you can add extra keywords for just that run
+(not saved), and optionally save the final list for reuse on this
+investigation. Saved lists are per-investigation, named after the same
+identifier used for the index file: `local_keywords_<name>.txt` next to
+`local_index_<name>.json`, or `smb_keywords_<ip>.txt` next to
+`smb_index_<ip>.json`.
+
+Once a saved list exists, pass `--keywords-saved` to load it directly and
+skip the menu entirely — useful for repeat runs on the same case.
 
 ---
 

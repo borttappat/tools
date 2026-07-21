@@ -68,6 +68,8 @@ Examples:
                              help='Path to keywords file (one per line)')
     talk_parser.add_argument('--keywords-inline',
                              help='Comma-separated keywords')
+    talk_parser.add_argument('--keywords-saved', action='store_true',
+                             help='Load the saved per-investigation keyword list (skips the interactive menu)')
     talk_parser.add_argument('--override-filesize',
                              help='Override 50MB limit (in MB, or "unlimited")')
 
@@ -90,6 +92,8 @@ Examples:
                            help='Path to keywords file')
     lt_parser.add_argument('--keywords-inline',
                            help='Comma-separated keywords')
+    lt_parser.add_argument('--keywords-saved', action='store_true',
+                           help='Load the saved per-investigation keyword list (skips the interactive menu)')
     lt_parser.add_argument('--override-filesize',
                            help='Override 50MB per-file limit (in MB, or "unlimited")')
 
@@ -104,6 +108,8 @@ Examples:
     parser.add_argument('--filetypes', help='File types for combined auto mode')
     parser.add_argument('--keywords', help='Keywords file for combined auto mode')
     parser.add_argument('--keywords-inline', help='Inline keywords for combined auto mode')
+    parser.add_argument('--keywords-saved', action='store_true',
+                        help='Load the saved per-investigation keyword list for combined auto mode')
     parser.add_argument('--override-filesize', help='Override file size limit')
     parser.add_argument('--version', action='version', version=f'Tango {VERSION}')
 
@@ -191,6 +197,7 @@ def _run_talk(args):
             filetypes=getattr(args, 'filetypes', None),
             keywords_file=getattr(args, 'keywords', None),
             keywords_inline=getattr(args, 'keywords_inline', None),
+            keywords_saved=getattr(args, 'keywords_saved', False),
             override_filesize=getattr(args, 'override_filesize', None)
         )
         if not talker.talk():
@@ -238,6 +245,7 @@ def _run_local_talk(args):
             filetypes=getattr(args, 'filetypes', None),
             keywords_file=getattr(args, 'keywords', None),
             keywords_inline=getattr(args, 'keywords_inline', None),
+            keywords_saved=getattr(args, 'keywords_saved', False),
             override_filesize=getattr(args, 'override_filesize', None)
         )
         if not analyzer.analyze():

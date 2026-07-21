@@ -17,6 +17,7 @@ from collections import defaultdict
 
 from logger import create_logger
 from text_extractor import extract_text, TIKA_EXTENSIONS
+import keywords as kwmod
 
 TEXT_EXTENSIONS = {
     'txt', 'ini', 'cfg', 'conf', 'log', 'xml', 'json', 'yaml', 'yml',
@@ -33,14 +34,15 @@ BINARY_EXTENSIONS = {'exe', 'dll', 'msi', 'bin', 'so', 'dylib'}
 
 class LocalAnalyzer:
     def __init__(self, root_path, filetypes=None, keywords_file=None,
-                 keywords_inline=None, override_filesize=None):
+                 keywords_inline=None, override_filesize=None, keywords_saved=False):
         self.root_path = Path(root_path).resolve()
         self.name = self.root_path.name
         self.logger = create_logger(self.name, "local-talk")
         self.start_time = time.time()
 
         self.selected_filetypes = self._parse_filetypes(filetypes) if filetypes else None
-        self.keywords = self._parse_keywords(keywords_file, keywords_inline)
+        self.keywords = self._parse_keywords(keywords_file, keywords_inline) if (keywords_file or keywords_inline) else []
+        self.keywords_saved = keywords_saved
         self.max_filesize = self._parse_filesize_limit(override_filesize)
 
         self.index_data = None
@@ -62,41 +64,18 @@ class LocalAnalyzer:
         return [ft.strip().lower() for ft in filetypes_str.split(',')]
 
     def _parse_keywords(self, keywords_file, keywords_inline):
-        default_keywords = [
-            'password', 'passwd', 'pass', 'pwd',
-            'secret', 'credential', 'cred',
-            'api_key', 'apikey', 'api-key',
-            'private_key', 'privatekey', 'private-key',
-            'ssh_key', 'sshkey', 'ssh-key',
-            'access_key', 'accesskey', 'access-key',
-            'secret_key', 'secretkey', 'secret-key',
-            'key', 'token', 'bearer', 'auth', 'authentication',
-            'username', 'user', 'account',
-            'admin', 'administrator', 'root',
-            'database', 'db', 'connection', 'connectionstring',
-            'dsn', 'jdbc', 'cert', 'certificate', 'pem', 'pfx', 'p12'
-        ]
-
-        keywords = []
         if keywords_file:
             try:
-                with open(keywords_file, 'r') as f:
-                    keywords = [line.strip().lower() for line in f if line.strip()]
+                keywords = kwmod.parse_keywords_file(keywords_file)
             except FileNotFoundError:
                 self.logger.error(f"Keywords file not found: {keywords_file}")
-                keywords = default_keywords
+                keywords = kwmod.DEFAULT_KEYWORDS
         elif keywords_inline:
             keywords = [kw.strip().lower() for kw in keywords_inline.split(',')]
         else:
-            keywords = default_keywords
+            keywords = kwmod.DEFAULT_KEYWORDS
 
-        seen = set()
-        unique = []
-        for kw in keywords:
-            if kw not in seen:
-                seen.add(kw)
-                unique.append(kw)
-        return unique
+        return kwmod.dedupe(keywords)
 
     def _parse_filesize_limit(self, override_str):
         if not override_str:
@@ -226,49 +205,21 @@ class LocalAnalyzer:
                 return []
 
     def interactive_keyword_input(self):
-        """Let user configure keywords, or use --keywords / --keywords-inline."""
+        """Let user configure keywords, or use --keywords / --keywords-inline / --keywords-saved."""
         if self.keywords:
             return self.keywords
 
-        print("\n" + "=" * 80)
-        print("Keyword Search Configuration")
-        print("=" * 80)
-        print("\n  1. Enter keywords manually (comma-separated)")
-        print("  2. Load keywords from file")
-        print("  3. Use default keyword set (recommended)")
-
-        while True:
-            try:
-                choice = input("\nYour choice [1/2/3]: ").strip()
-
-                if choice == '1':
-                    raw = input("Enter keywords (comma-separated): ").strip()
-                    if raw:
-                        return [kw.strip().lower() for kw in raw.split(',')]
-
-                elif choice == '2':
-                    file_path = input("Enter keywords file path: ").strip()
-                    try:
-                        with open(file_path, 'r') as f:
-                            return [line.strip().lower() for line in f if line.strip()]
-                    except FileNotFoundError:
-                        print(f"  File not found: {file_path}")
-
-                elif choice == '3':
-                    defaults = self._parse_keywords(None, None)
-                    print(f"\n  Using {len(defaults)} default keywords.")
-                    extra = input("  Add extra keywords (comma-separated, or Enter to skip): ").strip()
-                    if extra:
-                        defaults.extend([kw.strip().lower() for kw in extra.split(',')])
-                    confirm = input("Proceed? [Y/n]: ").strip().lower()
-                    if confirm in ['', 'y', 'yes']:
-                        return defaults
-                else:
-                    print("  Invalid choice.")
-
-            except KeyboardInterrupt:
-                print("\nAborted.")
+        if self.keywords_saved:
+            loaded = kwmod.load_saved_keywords('local', self.name)
+            if loaded is None:
+                self.logger.error(
+                    f"No saved keyword list found at {kwmod.saved_keywords_path('local', self.name)}. "
+                    f"Run without --keywords-saved once to create one."
+                )
                 return []
+            return loaded
+
+        return kwmod.interactive_keyword_menu('local', self.name, self.logger)
 
     # -------------------------------------------------------------------------
     # Keyword search methods
