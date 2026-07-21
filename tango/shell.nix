@@ -55,8 +55,13 @@ pkgs.mkShell {
 
     # Install/update dependencies
     if [ -f "requirements.txt" ]; then
-      # Always check - use --quiet to avoid noise on re-entry
-      pip install --quiet -r requirements.txt
+      if ! pip install --quiet -r requirements.txt; then
+        echo ""
+        echo "WARNING: pip install failed - dependencies may be missing or outdated."
+        echo "         Check network/PyPI access (e.g. air-gapped machine) and re-run:"
+        echo "         pip install -r requirements.txt"
+        echo ""
+      fi
     fi
 
     echo "Python: $(python3 --version)"
