@@ -23,13 +23,15 @@ pkgs.mkShell {
     # Create and activate virtual environment
     VENV_DIR=".venv"
     if [ ! -d "$VENV_DIR" ]; then
-      python3 -m venv "$VENV_DIR"
+      python3 -m venv "$VENV_DIR" 2>/dev/null
     fi
-    source "$VENV_DIR/bin/activate"
+    source "$VENV_DIR/bin/activate" 2>/dev/null
 
-    # Install Python dependencies from requirements.txt
-    if [ -f requirements.txt ]; then
-      pip install -q --disable-pip-version-check -r requirements.txt 2>&1 | grep -v "already satisfied" || true
+    # Install Python dependencies from requirements.txt (skip if pypff already installed)
+    if [ -f requirements.txt ] && ! python3 -c "import pypff" 2>/dev/null; then
+      timeout 120 pip install -q --disable-pip-version-check --no-cache-dir -r requirements.txt 2>/dev/null &
+      INSTALL_PID=$!
+      wait $INSTALL_PID 2>/dev/null || true
     fi
 
     echo "postman-drat - Email & Document Extraction Toolkit"
@@ -45,5 +47,6 @@ pkgs.mkShell {
     echo "  ./exfil -r <dir>                       # Recursive extraction"
     echo "  ./exfil -g \"pattern\" -r <dir>           # Grep across extracted content"
     echo ""
+    echo "(Installing Python packages... first entry may take a moment)"
   '';
 }
