@@ -1,5 +1,4 @@
-#!/usr/bin/env nix-shell
-#!nix-shell -i bash -p python3 pandoc poppler-utils python3Packages.pip python3Packages.openpyxl
+#!/usr/bin/env bash
 
 # exfil - Universal document extractor for CLI
 # Usage:
