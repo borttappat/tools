@@ -212,7 +212,7 @@ def main():
         print(f"Opening PST: {PST_FILE}")
         pff_file.open(PST_FILE)
 
-        root = pff_file.root_entity
+        root = pff_file.root_item
         print(f"Root folder: {root.get_name()}")
         print("")
 
