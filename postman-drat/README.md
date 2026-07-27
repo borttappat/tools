@@ -69,15 +69,43 @@ Universal document extractor for CLI.
 find ./out/attachments/pdf -name "*report*"
 ```
 
-## Installation
+## Setup
+
+### Using Nix (Recommended)
 
 ```bash
 git clone https://github.com/borttappat/postman-drat.git
 cd postman-drat
+nix-shell          # Sets up Python venv + all dependencies
 chmod +x pst-export exfil
+./pst-export mail.pst ./output
 ```
 
-**Dependencies:**
-- `nix-shell -p python3 libpff pandoc poppler-utils python3Packages.pip python3Packages.openpyxl`
+The `nix-shell` automatically:
+- Creates a Python virtual environment (`.venv/`)
+- Installs all pip dependencies from `requirements.txt`
+- Provides system tools: `pandoc`, `pdftotext`, `libpff`, and build tools
 
-Or install packages via your package manager.
+**Note:** On first entry or on machines without a `.venv` cache, `nix-shell` may take a minute to download and set up dependencies. Subsequent entries are faster.
+
+**If nix-shell hangs:**
+- Press `Ctrl+C` after 30+ seconds and it should continue
+- Or manually install: `pip install -r requirements.txt` after entering the shell
+
+### Manual Installation
+
+Without Nix, install dependencies manually:
+
+```bash
+# Install system packages (macOS/Homebrew example)
+brew install pandoc poppler libpff
+
+# Install Python packages
+pip install -r requirements.txt
+```
+
+Then run the tools directly:
+```bash
+./pst-export mail.pst ./output
+./exfil document.pdf
+```
