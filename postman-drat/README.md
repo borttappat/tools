@@ -6,29 +6,43 @@ CLI tools for extracting and exporting structured data from emails and documents
 
 ### pst-export
 
-Export PST/Outlook files to a clean directory structure.
+Export PST/OST/PAB (Outlook) files to a clean directory structure.
 
 ```bash
 ./pst-export <mail.pst> [output_dir]
 ```
 
+Internally this runs `pffexport` (from libpff) to do the actual PST parsing,
+then reorganizes its output:
+
 **Output:**
 ```
 output/
-├── manifest.txt           # Full index of exported items
-├── emails/                # Emails organized by PST folder
-│   └── Inbox/
-│       └── 2024-01-15__Subject.eml
-└── attachments/           # Files sorted by type
+├── manifest.txt           # Index of email items: Subject/From/To/Date
+├── emails/                # pffexport's native per-item export, by PST folder
+│   └── Top of Personal Folders/
+│       └── Inbox/
+│           └── Message00001/
+│               ├── OutlookHeaders.txt
+│               ├── Message.txt
+│               ├── Recipients.txt
+│               └── Attachments/
+└── attachments/           # Every attachment, additionally fanned out by type
     ├── pdf/
     ├── docx/
     ├── xlsx/
     └── other/
 ```
 
-Each email file includes headers (`From`, `To`, `Subject`, `Date`, `Source Folder`) followed by the body. Attachments are named with their source email prefix for traceability.
+Each email is a directory (pffexport's own format: separate headers, body,
+and recipients files) rather than a single combined file, since that content
+is already correctly parsed by pffexport itself. `manifest.txt` gives a flat,
+scannable index (Subject/From/To/Date) across every email so you don't have
+to open each directory by hand. Non-email PST items (contacts, calendar
+entries, tasks, etc.) are exported by pffexport alongside the emails but are
+not indexed in `manifest.txt`.
 
-**Requires:** `libpff` (available via `nix-shell -p libpff`)
+**Requires:** `pffexport` (from `libpff`), available via `nix develop` / `nix run` below.
 
 ---
 
@@ -47,12 +61,16 @@ Universal document extractor for CLI.
 
 | Format | Tool |
 |--------|------|
-| PST | `pffexport` (needs `libpff`) |
+| PST/OST/PAB | `pst-export` (wraps `pffexport`, needs `libpff`) |
 | PDF | `pdftotext` |
 | DOCX | `pandoc` or `python-docx` |
 | XLSX | `openpyxl` |
-| PPTX | `python-pptx` (pip) |
+| PPTX | `python-pptx` |
 | TXT/MD/JSON/XML/YAML | Direct |
+
+PST extraction shells out to `pst-export` (looked up next to `exfil`, or on
+`PATH`), exports to a scratch directory, and streams the resulting message
+headers/bodies to stdout so it greps and pipes like every other format here.
 
 ---
 
@@ -71,26 +89,28 @@ find ./out/attachments/pdf -name "*report*"
 
 ## Setup
 
-### Using Nix (Recommended)
+### Nix flake, no clone required (recommended)
 
 ```bash
-git clone https://github.com/borttappat/postman-drat.git
+nix run github:borttappat/tools?dir=postman-drat#pst-export -- mail.pst ./output
+nix run github:borttappat/tools?dir=postman-drat#exfil -- -g "invoice" -r ./output/emails/
+```
+
+Pulls a fully pinned environment (Python + openpyxl/python-docx/python-pptx,
+pandoc, poppler, libpff) straight from the flake: no cloning, no venv, no
+system package install.
+
+### Nix (local checkout)
+
+```bash
 cd postman-drat
-nix-shell          # Sets up Python venv + all dependencies
+nix develop      # drops into a dev shell with the same pinned environment
 chmod +x pst-export exfil
 ./pst-export mail.pst ./output
 ```
 
-The `nix-shell` automatically:
-- Creates a Python virtual environment (`.venv/`)
-- Installs all pip dependencies from `requirements.txt`
-- Provides system tools: `pandoc`, `pdftotext`, `libpff`, and build tools
-
-**Note:** On first entry or on machines without a `.venv` cache, `nix-shell` may take a minute to download and set up dependencies. Subsequent entries are faster.
-
-**If nix-shell hangs:**
-- Press `Ctrl+C` after 30+ seconds and it should continue
-- Or manually install: `pip install -r requirements.txt` after entering the shell
+`nix-shell` still works too (see `shell.nix`), using the same pinned
+`nixpkgs` packages rather than a runtime pip install.
 
 ### Manual Installation
 

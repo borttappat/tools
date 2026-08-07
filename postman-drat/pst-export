@@ -2,10 +2,16 @@
 
 # pst-export - Export PST files to structured directory format
 # Usage: pst-export <pst_file> [output_dir]
+#
+# Delegates the actual PST parsing to `pffexport` (from libpff), then
+# reorganizes its output into a manifest + type-sorted attachments folder.
+# pffexport's own per-item directories (Message00001/, with
+# OutlookHeaders.txt, Message.txt/.html/.rtf, Recipients.txt and an
+# Attachments/ subdirectory) are preserved as-is under emails/, since that
+# content is already correctly parsed; nothing here re-parses PST internals.
 
 set -euo pipefail
 
-# Default values
 OUTPUT_DIR="${2:-./pst-export}"
 PST_FILE="${1:-}"
 
@@ -14,225 +20,152 @@ if [[ -z "$PST_FILE" ]] || [[ ! -f "$PST_FILE" ]]; then
     echo "Example: pst-export mail.pst ./outbox" >&2
     echo "" >&2
     echo "This tool exports PST/Outlook files with:" >&2
-    echo "  - emails/          : Email bodies organized by folder structure" >&2
-    echo "  - attachments/     : Files sorted by type (pdf, docx, xlsx, etc.)" >&2
-    echo "  - manifest.txt     : Index of all exported items" >&2
+    echo "  - emails/          : pffexport's native per-item export, organized by PST folder" >&2
+    echo "  - attachments/     : attachment files, fanned out by type (pdf, docx, xlsx, etc.)" >&2
+    echo "  - manifest.txt     : index of exported email items (Subject/From/To/Date)" >&2
     exit 1
 fi
 
-# Create output structure
-mkdir -p "$OUTPUT_DIR/emails"
-mkdir -p "$OUTPUT_DIR/attachments/pdf"
-mkdir -p "$OUTPUT_DIR/attachments/doc"
-mkdir -p "$OUTPUT_DIR/attachments/docx"
-mkdir -p "$OUTPUT_DIR/attachments/xlsx"
-mkdir -p "$OUTPUT_DIR/attachments/pptx"
-mkdir -p "$OUTPUT_DIR/attachments/txt"
-mkdir -p "$OUTPUT_DIR/attachments/other"
+if ! command -v pffexport &>/dev/null; then
+    echo "Error: pffexport not found (comes from libpff)." >&2
+    echo "       Enter the dev shell (nix develop) or run via the flake (nix run)." >&2
+    exit 1
+fi
 
-# Export manifest file
-MANIFEST="$OUTPUT_DIR/manifest.txt"
-echo "PST Export Manifest" > "$MANIFEST"
-echo "===================" >> "$MANIFEST"
-echo "Source: $PST_FILE" >> "$MANIFEST"
-echo "Output: $OUTPUT_DIR" >> "$MANIFEST"
-echo "Date: $(date -Iseconds)" >> "$MANIFEST"
-echo "" >> "$MANIFEST"
+mkdir -p "$OUTPUT_DIR/attachments/pdf" "$OUTPUT_DIR/attachments/doc" \
+         "$OUTPUT_DIR/attachments/docx" "$OUTPUT_DIR/attachments/xlsx" \
+         "$OUTPUT_DIR/attachments/pptx" "$OUTPUT_DIR/attachments/txt" \
+         "$OUTPUT_DIR/attachments/other"
 
-# Python script to traverse PST and export
-export OUTPUT_DIR PST_FILE
+WORKDIR=$(mktemp -d)
+trap 'rm -rf "$WORKDIR"' EXIT
+
+echo "Exporting PST via pffexport: $PST_FILE"
+pffexport -f text -t "$WORKDIR/export" -l "$WORKDIR/pffexport.log" "$PST_FILE"
+
+EXPORT_ROOT="$WORKDIR/export.export"
+if [[ ! -d "$EXPORT_ROOT" ]]; then
+    echo "Error: pffexport did not produce the expected export directory ($EXPORT_ROOT)." >&2
+    echo "       Check $WORKDIR/pffexport.log for details." >&2
+    exit 1
+fi
+
+rm -rf "$OUTPUT_DIR/emails"
+mv "$EXPORT_ROOT" "$OUTPUT_DIR/emails"
+cp "$WORKDIR/pffexport.log" "$OUTPUT_DIR/pffexport.log" 2>/dev/null || true
+
+# Fan out attachments by type and build manifest.txt. Parsing is intentionally
+# lenient: OutlookHeaders.txt/Recipients.txt are pffexport's own structured
+# "Label:<tabs>value" dumps, not something we reconstruct from raw PST data.
+export OUTPUT_DIR
 python3 << 'PYTHON'
-import sys
 import os
 import re
-import pypff
+import shutil
 
-OUTPUT_DIR = os.environ.get('OUTPUT_DIR', './pst-export')
-PST_FILE = os.environ.get('PST_FILE', '')
+OUTPUT_DIR = os.environ['OUTPUT_DIR']
+EMAILS_DIR = os.path.join(OUTPUT_DIR, 'emails')
 MANIFEST = os.path.join(OUTPUT_DIR, 'manifest.txt')
 
-# Counters for manifest
+ATTACHMENT_FOLDERS = {
+    'pdf': 'pdf', 'doc': 'doc', 'docx': 'docx', 'xlsx': 'xlsx',
+    'pptx': 'pptx', 'txt': 'txt', 'md': 'txt', 'log': 'txt',
+}
+
+
+def read_field(path, label):
+    """Pull the first 'Label:<tabs/spaces>value' line from a pffexport dump."""
+    if not os.path.isfile(path):
+        return ""
+    pattern = re.compile(r'^\s*' + re.escape(label) + r'\s*(.*)$')
+    with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+        for line in f:
+            m = pattern.match(line)
+            if m:
+                return m.group(1).strip()
+    return ""
+
+
+def read_all_fields(path, label):
+    if not os.path.isfile(path):
+        return []
+    pattern = re.compile(r'^\s*' + re.escape(label) + r'\s*(.*)$')
+    values = []
+    with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+        for line in f:
+            m = pattern.match(line)
+            if m and m.group(1).strip():
+                values.append(m.group(1).strip())
+    return values
+
+
+def attachment_type_folder(filename):
+    ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+    return ATTACHMENT_FOLDERS.get(ext, 'other')
+
+
 email_count = 0
 attachment_count = 0
 
-def sanitize_filename(name):
-    """Sanitize filename for filesystem safety."""
-    if not name:
-        return "unnamed"
-    # Remove/replace invalid characters
-    sanitized = "".join(c for c in name if c not in r'\/:*?"<>|')
-    return sanitized[:255] or "unnamed"
+manifest_lines = [
+    "PST Export Manifest",
+    "===================",
+    f"Emails directory: {EMAILS_DIR}",
+    "",
+]
 
-def extract_email_body(entry):
-    """Extract email body, preferring HTML then plain text."""
-    html_body = entry.get_transmission_body_html() or ""
-    body = entry.get_body() or ""
+for root, dirs, files in os.walk(EMAILS_DIR):
+    if 'OutlookHeaders.txt' not in files:
+        continue
 
-    # If we have HTML, convert to text
-    if html_body:
-        try:
-            # Simple HTML to text conversion
-            html_body = re.sub(r'<br\s*/?>', '\n', html_body, flags=re.IGNORECASE)
-            html_body = re.sub(r'<p[^>]*>', '\n\n', html_body, flags=re.IGNORECASE)
-            html_body = re.sub(r'</(div|p|li)>', '\n', html_body, flags=re.IGNORECASE)
-            html_body = re.sub(r'<[^>]+>', '', html_body)
-            html_body = html_body.replace('&nbsp;', ' ')
-            html_body = html_body.replace('&amp;', '&')
-            html_body = html_body.replace('&lt;', '<')
-            html_body = html_body.replace('&gt;', '>')
-            html_body = html_body.replace('&quot;', '"')
-            return html_body.strip()
-        except:
-            pass
+    headers_path = os.path.join(root, 'OutlookHeaders.txt')
+    recipients_path = os.path.join(root, 'Recipients.txt')
+    rel_path = os.path.relpath(root, EMAILS_DIR)
 
-    # Fall back to plain body
-    return body.strip() if body else ""
+    subject = read_field(headers_path, 'Subject:') or "No Subject"
+    sender_name = read_field(headers_path, 'Sender name:')
+    sender_email = read_field(headers_path, 'Sender email address:')
+    sent_time = (
+        read_field(headers_path, 'Client submit time:')
+        or read_field(headers_path, 'Delivery time:')
+        or read_field(headers_path, 'Creation time:')
+    )
+    recipients = read_all_fields(recipients_path, 'Email address:')
 
-def process_email(entry, folder_path):
-    """Process a single email entry and export it."""
-    global email_count, attachment_count
-
-    subject = entry.get_subject() or "No Subject"
-    sender = entry.get_sender_address() or "Unknown"
-    receiver = entry.get_receiver_address() or ""
-    received_time = entry.get_received_time() or ""
-
-    # Clean up addresses
-    sender = sender.replace('<', '').replace('>', '').strip()
-    receiver = receiver.replace('<', '').replace('>', '').strip()
-
-    body = extract_email_body(entry)
-
-    # Create sanitized filename
-    safe_subject = sanitize_filename(subject[:50])
-    timestamp = received_time.replace(':', '-').replace(' ', '_')[:20] if received_time else ""
-    email_filename = f"{timestamp}_{safe_subject}.eml"
-    email_base = email_filename.replace('.eml', '')
-
-    # Create email file
-    email_path = os.path.join(OUTPUT_DIR, 'emails', folder_path)
-    os.makedirs(email_path, exist_ok=True)
-
-    email_file = os.path.join(email_path, email_filename)
-    with open(email_file, 'w', encoding='utf-8') as f:
-        f.write(f"From: {sender}\n")
-        f.write(f"To: {receiver}\n")
-        f.write(f"Subject: {subject}\n")
-        if received_time:
-            f.write(f"Date: {received_time}\n")
-        f.write(f"Source Folder: {folder_path}\n")
-        f.write("-" * 60 + "\n\n")
-        f.write(body)
-
-    print(f"[EMAIL] {folder_path}/{email_filename}")
     email_count += 1
+    manifest_lines.append(f"[EMAIL] {rel_path}")
+    manifest_lines.append(f"  Subject: {subject}")
+    if sender_name or sender_email:
+        manifest_lines.append(f"  From: {sender_name} <{sender_email}>".replace(" <>", ""))
+    if recipients:
+        manifest_lines.append(f"  To: {', '.join(recipients)}")
+    if sent_time:
+        manifest_lines.append(f"  Date: {sent_time}")
 
-    # Add to manifest
-    with open(MANIFEST, 'a') as mf:
-        mf.write(f"[EMAIL] {folder_path}/{email_filename}\n")
-        mf.write(f"  Subject: {subject}\n")
-        mf.write(f"  From: {sender}\n")
-        if received_time:
-            mf.write(f"  Date: {received_time}\n")
+    attachments_dir = os.path.join(root, 'Attachments')
+    if os.path.isdir(attachments_dir):
+        msg_base = os.path.basename(root)
+        for att_name in sorted(os.listdir(attachments_dir)):
+            att_path = os.path.join(attachments_dir, att_name)
+            if not os.path.isfile(att_path):
+                continue
+            folder = attachment_type_folder(att_name)
+            safe_name = f"{msg_base}__{att_name}"
+            dest = os.path.join(OUTPUT_DIR, 'attachments', folder, safe_name)
+            shutil.copy2(att_path, dest)
+            attachment_count += 1
+            manifest_lines.append(f"  [ATTACH] {folder}/{safe_name}")
 
-    # Process attachments
-    for i in range(entry.number_of_sub_items):
-        try:
-            sub = entry.get_sub_item(i)
-            if sub.message_class == "IPM.Attachment":
-                att_name = sub.get_name() or "attachment"
-                att_data = sub.get_data()
-                att_size = sub.get_data_size() if hasattr(sub, 'get_data_size') else len(att_data) if att_data else 0
+manifest_lines.append("")
+manifest_lines.append("===================")
+manifest_lines.append(f"Total emails: {email_count}")
+manifest_lines.append(f"Total attachments: {attachment_count}")
 
-                if att_data and len(att_data) > 0:
-                    # Determine attachment type
-                    att_name_lower = att_name.lower()
-                    if att_name_lower.endswith('.pdf'):
-                        att_folder = 'pdf'
-                    elif att_name_lower.endswith('.doc'):
-                        att_folder = 'doc'
-                    elif att_name_lower.endswith('.docx'):
-                        att_folder = 'docx'
-                    elif att_name_lower.endswith('.xlsx'):
-                        att_folder = 'xlsx'
-                    elif att_name_lower.endswith('.pptx'):
-                        att_folder = 'pptx'
-                    elif att_name_lower.endswith(('.txt', '.md', '.log')):
-                        att_folder = 'txt'
-                    else:
-                        att_folder = 'other'
+with open(MANIFEST, 'w', encoding='utf-8') as f:
+    f.write("\n".join(manifest_lines) + "\n")
 
-                    att_dir = os.path.join(OUTPUT_DIR, 'attachments', att_folder)
-                    os.makedirs(att_dir, exist_ok=True)
-
-                    safe_att_name = sanitize_filename(att_name)
-                    att_path = os.path.join(att_dir, f"{email_base}__{safe_att_name}")
-
-                    with open(att_path, 'wb') as af:
-                        af.write(att_data)
-
-                    print(f"  [ATTACHMENT] {att_folder}/{safe_att_name}")
-                    attachment_count += 1
-
-                    # Add to manifest
-                    with open(MANIFEST, 'a') as mf:
-                        mf.write(f"  [ATTACH] {att_folder}/{safe_att_name}\n")
-        except Exception as e:
-            print(f"    Warning: Could not process attachment: {e}", file=sys.stderr)
-
-def traverse_folder(entry, folder_path=""):
-    """Recursively traverse PST folders and process emails."""
-    current_path = f"{folder_path}/{entry.get_name()}" if folder_path else entry.get_name()
-
-    is_folder = entry.get_contains_folders()
-    is_messages = entry.get_contains_messages()
-
-    if is_messages and not is_folder:
-        # Process emails in this folder
-        for i in range(entry.number_of_sub_items):
-            try:
-                sub = entry.get_sub_item(i)
-                if sub.message_class == "IPM.Note":  # Email message
-                    process_email(sub, current_path)
-            except Exception as e:
-                print(f"  Warning: Could not process item: {e}", file=sys.stderr)
-
-    if is_folder:
-        # Recurse into subfolders
-        for i in range(entry.number_of_sub_items):
-            try:
-                sub = entry.get_sub_item(i)
-                traverse_folder(sub, current_path)
-            except Exception as e:
-                print(f"  Warning: Could not traverse folder: {e}", file=sys.stderr)
-
-def main():
-    pff_file = pypff.file()
-    try:
-        print(f"Opening PST: {PST_FILE}")
-        pff_file.open(PST_FILE)
-
-        root = pff_file.root_item
-        print(f"Root folder: {root.get_name()}")
-        print("")
-
-        # Start traversal from root
-        traverse_folder(root)
-
-        # Finalize manifest
-        with open(MANIFEST, 'a') as mf:
-            mf.write(f"\n===================\n")
-            mf.write(f"Total emails: {email_count}\n")
-            mf.write(f"Total attachments: {attachment_count}\n")
-
-        print(f"\nExport complete.")
-        print(f"  Emails: {email_count}")
-        print(f"  Attachments: {attachment_count}")
-        print(f"  Output directory: {OUTPUT_DIR}")
-
-    finally:
-        pff_file.close()
-
-if __name__ == "__main__":
-    main()
+print(f"\nExport complete.")
+print(f"  Emails: {email_count}")
+print(f"  Attachments: {attachment_count}")
+print(f"  Output directory: {OUTPUT_DIR}")
 PYTHON

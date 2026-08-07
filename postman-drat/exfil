@@ -6,37 +6,46 @@
 #   exfil -r <dir>        - Recursively extract from all files in directory
 #   exfil -g <pattern>    - Grep for pattern in all extracted content
 #   exfil -g <p> -r <dir> - Grep pattern recursively
-#   exfil --pst <file>    - Extract PST only (uses pffexport)
+#   exfil --pst <file>    - Extract PST only (uses pst-export/pffexport)
 
 set -euo pipefail
 
-# Setup virtualenv with pip packages if not already done
-VENV_DIR="${EXFIL_VENV:-$HOME/.local/share/exfil-venv}"
-EXTRACT_INSTALLED="$VENV_DIR/.extract_installed"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-setup_venv() {
-    if [[ ! -d "$VENV_DIR" ]]; then
-        python3 -m venv "$VENV_DIR"
-    fi
-    if [[ ! -f "$EXTRACT_INSTALLED" ]]; then
-        echo "Installing additional extractors into $VENV_DIR (first run only)..." >&2
-        "$VENV_DIR/bin/pip" install --quiet python-pptx 2>/dev/null || true
-        touch "$EXTRACT_INSTALLED"
-    fi
-}
-
-# --- PST extraction via libpff (pffexport) ---
+# --- PST extraction, via pst-export (which itself wraps pffexport) ---
+# pffexport writes an export tree to disk; it does not print message content
+# to stdout. pst-export does the export into a scratch directory, and this
+# prints the resulting message text so it behaves like every other
+# extract_* function here (stdout, greppable).
 extract_pst() {
     local file="$1"
-    if command -v pffexport &>/dev/null; then
-        pffexport "$file" 2>/dev/null || true
-    elif command -v pffexport2 &>/dev/null; then
-        pffexport2 "$file" 2>/dev/null || true
+    local pst_export_bin=""
+
+    if [[ -x "$SCRIPT_DIR/pst-export" ]]; then
+        pst_export_bin="$SCRIPT_DIR/pst-export"
+    elif command -v pst-export &>/dev/null; then
+        pst_export_bin="pst-export"
     else
-        echo "[WARNING] PST support requires libpff (pffexport)" >&2
-        echo "[INFO]    Install with: nix-shell -p libpff" >&2
+        echo "[WARNING] PST support requires pst-export (bundled alongside exfil) or pffexport (libpff)" >&2
         return 1
     fi
+
+    local tmp_out
+    tmp_out=$(mktemp -d)
+
+    if ! "$pst_export_bin" "$file" "$tmp_out" >&2; then
+        rm -rf "$tmp_out"
+        return 1
+    fi
+
+    find "$tmp_out/emails" -type f \( -name 'OutlookHeaders.txt' -o -name 'Message.txt' \) 2>/dev/null | sort |
+        while IFS= read -r part; do
+            echo "--- $(dirname "${part#"$tmp_out"/emails/}") ---"
+            cat "$part"
+            echo ""
+        done
+
+    rm -rf "$tmp_out"
 }
 
 # --- PDF extraction ---
@@ -79,8 +88,7 @@ extract_csv() {
 
 # --- PowerPoint extraction ---
 extract_pptx() {
-    setup_venv
-    "$VENV_DIR/bin/python" -c "
+    python3 -c "
 from pptx import Presentation
 import sys
 prs = Presentation('$1')
@@ -124,7 +132,7 @@ extract_file() {
     ext=$(get_ext "$file")
 
     case "$ext" in
-        pst|ans|uni)       extract_pst "$file" || true ;;
+        pst|ost|pab)       extract_pst "$file" || true ;;
         pdf)               extract_pdf "$file" ;;
         doc|docx|odt|rtf)  extract_docx "$file" ;;
         xls|xlsx|ods)      extract_xlsx "$file" ;;
@@ -145,7 +153,7 @@ Usage:
   exfil -r <dir>         Recursively extract from all files
   exfil -g <pattern>     Grep for pattern (single file)
   exfil -g <p> -r <dir>  Grep pattern recursively
-  exfil --pst <file>     Extract PST only (uses pffexport)
+  exfil --pst <file>     Extract PST only (uses pst-export/pffexport)
 
 Examples:
   exfil document.docx               # Extract text from DOCX
@@ -155,7 +163,7 @@ Examples:
   exfil file1.pst file2.pst         # Extract multiple PSTs (if libpff installed)
 
 Supported formats:
-  PST (Outlook) - requires libpff (nix-shell -p libpff)
+  PST/OST/PAB (Outlook) - requires libpff (nix develop, or system package)
   PDF (via pdftotext)
   DOCX (via pandoc or python-docx)
   XLSX (via openpyxl)
@@ -204,11 +212,9 @@ main() {
                 while IFS= read -r f; do
                     ext=$(get_ext "$f")
                     case "$ext" in
-                        pst)
-                            if command -v pffexport &>/dev/null; then
-                                content=$(pffexport "$f" 2>/dev/null || true)
-                                [[ -n "$content" ]] && echo "=== $f ===" && echo "$content" | grep -i "$grep_pattern" || true
-                            fi
+                        pst|ost|pab)
+                            content=$(extract_pst "$f" 2>/dev/null || true)
+                            [[ -n "$content" ]] && echo "=== $f ===" && echo "$content" | grep -i "$grep_pattern" || true
                             ;;
                         pdf)
                             content=$(pdftotext "$f" - 2>/dev/null || true)
@@ -231,7 +237,7 @@ main() {
                             [[ -n "$content" ]] && echo "=== $f ===" && echo "$content" | grep -i "$grep_pattern" || true
                             ;;
                     esac
-                done < <(find "$file" -type f \( -name "*.pst" -o -name "*.pdf" -o -name "*.doc" -o -name "*.docx" -o -name "*.xls" -o -name "*.xlsx" -o -name "*.ppt" -o -name "*.pptx" -o -name "*.txt" -o -name "*.md" -o -name "*.log" \))
+                done < <(find "$file" -type f \( -name "*.pst" -o -name "*.ost" -o -name "*.pab" -o -name "*.pdf" -o -name "*.doc" -o -name "*.docx" -o -name "*.xls" -o -name "*.xlsx" -o -name "*.ppt" -o -name "*.pptx" -o -name "*.txt" -o -name "*.md" -o -name "*.log" \))
             else
                 echo "=== $file ==="
                 extract_file "$file" | grep -i "$grep_pattern" || true
@@ -246,7 +252,7 @@ main() {
             while IFS= read -r f; do
                 echo "=== $f ==="
                 extract_file "$f"
-            done < <(find "$file" -type f \( -name "*.pst" -o -name "*.pdf" -o -name "*.doc" -o -name "*.docx" -o -name "*.xls" -o -name "*.xlsx" -o -name "*.ppt" -o -name "*.pptx" -o -name "*.txt" -o -name "*.md" -o -name "*.log" \))
+            done < <(find "$file" -type f \( -name "*.pst" -o -name "*.ost" -o -name "*.pab" -o -name "*.pdf" -o -name "*.doc" -o -name "*.docx" -o -name "*.xls" -o -name "*.xlsx" -o -name "*.ppt" -o -name "*.pptx" -o -name "*.txt" -o -name "*.md" -o -name "*.log" \))
         else
             echo "=== $file ==="
             extract_file "$file"
