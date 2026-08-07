@@ -17,6 +17,7 @@ from collections import defaultdict
 
 from logger import create_logger
 from text_extractor import extract_text, TIKA_EXTENSIONS
+from metadata_extractor import extract_metadata, notable_fields
 import keywords as kwmod
 
 TEXT_EXTENSIONS = {
@@ -34,7 +35,8 @@ BINARY_EXTENSIONS = {'exe', 'dll', 'msi', 'bin', 'so', 'dylib'}
 
 class LocalAnalyzer:
     def __init__(self, root_path, filetypes=None, keywords_file=None,
-                 keywords_inline=None, override_filesize=None, keywords_saved=False):
+                 keywords_inline=None, override_filesize=None, keywords_saved=False,
+                 metadata_enabled=False):
         self.root_path = Path(root_path).resolve()
         self.name = self.root_path.name
         self.logger = create_logger(self.name, "local-talk")
@@ -44,6 +46,7 @@ class LocalAnalyzer:
         self.keywords = self._parse_keywords(keywords_file, keywords_inline) if (keywords_file or keywords_inline) else []
         self.keywords_saved = keywords_saved
         self.max_filesize = self._parse_filesize_limit(override_filesize)
+        self.metadata_enabled = metadata_enabled
 
         self.index_data = None
         self.output_dir = f"local_results_{self.name}"
@@ -428,25 +431,6 @@ class LocalAnalyzer:
                         f.write(f"  {match['line_number']+1}: {match['context_after']}\n")
                     f.write("\n")
 
-                # Per-file summary
-                f.write("-" * 80 + "\n")
-                pass_matches = [m for m in matches if 'pass' in m['matched_keyword']]
-                key_matches = [m for m in matches if 'key' in m['matched_keyword']]
-                admin_matches = [m for m in matches if 'admin' in m['matched_keyword']]
-                if pass_matches:
-                    f.write(f"  Credentials: {len(pass_matches)} password fields\n")
-                if key_matches:
-                    f.write(f"  Keys/Tokens: {len(key_matches)} references\n")
-                if admin_matches:
-                    f.write(f"  Admin refs:  {len(admin_matches)}\n")
-                if pass_matches or key_matches:
-                    f.write("  Priority: HIGH\n")
-                elif admin_matches:
-                    f.write("  Priority: MEDIUM\n")
-                else:
-                    f.write("  Priority: LOW\n")
-                f.write("-" * 80 + "\n\n")
-
             f.write("=" * 80 + "\n")
             f.write("End of Results\n")
             f.write("=" * 80 + "\n")
@@ -454,6 +438,56 @@ class LocalAnalyzer:
             f.write(f"Report date: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC\n")
 
         return results_file
+
+    def generate_metadata_file(self, file_type, metadata_by_file):
+        """Write METADATA.txt and METADATA.json for a given file type."""
+        out_dir = f"{self.output_dir}/by_type/{file_type}"
+        os.makedirs(out_dir, exist_ok=True)
+
+        json_file = f"{out_dir}/METADATA.json"
+        with open(json_file, 'w', encoding='utf-8') as f:
+            json.dump(
+                {str(Path(fp).relative_to(self.root_path)) if Path(fp).is_relative_to(self.root_path) else fp: meta
+                 for fp, meta in metadata_by_file.items()},
+                f, indent=2, default=str
+            )
+
+        txt_file = f"{out_dir}/METADATA.txt"
+        with open(txt_file, 'w', encoding='utf-8') as f:
+            f.write("=" * 80 + "\n")
+            f.write("Tango Metadata Extraction Results\n")
+            f.write("=" * 80 + "\n")
+            f.write(f"File Type:      .{file_type}\n")
+            f.write(f"Root Path:      {self.root_path}\n")
+            f.write(f"Scan Date:      {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC\n")
+            f.write(f"Files:          {len(metadata_by_file)}\n")
+            f.write("\n" + "=" * 80 + "\n\n")
+
+            for file_path, meta in metadata_by_file.items():
+                if not meta:
+                    continue
+                rel = Path(file_path).relative_to(self.root_path) if Path(file_path).is_relative_to(self.root_path) else file_path
+                f.write("#" * 80 + "\n")
+                f.write(f"FILE: {rel}\n")
+                f.write("#" * 80 + "\n\n")
+
+                notable = notable_fields(meta)
+                if notable:
+                    f.write("Notable fields:\n")
+                    for tag, value in notable.items():
+                        f.write(f"  {tag}: {value}\n")
+                    f.write("\n")
+
+                f.write("All fields:\n")
+                for tag, value in meta.items():
+                    f.write(f"  {tag}: {value}\n")
+                f.write("\n")
+
+            f.write("=" * 80 + "\n")
+            f.write("End of Metadata\n")
+            f.write("=" * 80 + "\n")
+
+        return txt_file
 
     # -------------------------------------------------------------------------
     # Main entry point
@@ -509,6 +543,7 @@ class LocalAnalyzer:
                 self.logger.info(f"\n[SEARCH] .{file_type} ({len(files)} files)")
 
                 matches_by_file = {}
+                metadata_by_file = {}
 
                 for i, fi in enumerate(files, 1):
                     file_path = fi['path']
@@ -535,6 +570,11 @@ class LocalAnalyzer:
                         self.stats['total_matches'] += len(matches)
                         self.logger.match(f"{fi['relative_path']} ({len(matches)} matches)")
 
+                    if self.metadata_enabled:
+                        meta = extract_metadata(file_path, self.logger)
+                        if meta:
+                            metadata_by_file[file_path] = meta
+
                     if i % 50 == 0 or i == len(files):
                         pct = (i / len(files)) * 100
                         self.logger.info(f"  Progress: {i}/{len(files)} ({pct:.0f}%)")
@@ -544,6 +584,10 @@ class LocalAnalyzer:
                     found = sum(len(m) for m in matches_by_file.values())
                     matched_files = len([f for f, m in matches_by_file.items() if m])
                     self.logger.info(f"  [RESULTS] {matched_files} files with {found} matches → {results_file}")
+
+                if metadata_by_file:
+                    metadata_file = self.generate_metadata_file(file_type, metadata_by_file)
+                    self.logger.info(f"  [METADATA] {len(metadata_by_file)} files → {metadata_file}")
 
             duration = time.time() - self.start_time
             duration_str = f"{int(duration // 60)} minutes {int(duration % 60)} seconds"

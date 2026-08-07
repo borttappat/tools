@@ -15,12 +15,15 @@ venv/
 smbhound-venv/
 .env
 
-# SMBHound output files
+# Tango output files
 smb_index_*.txt
 smb_index_*.json
 downloads_*/
 large_files_*.txt
-smbhound_*_*.log
+local_index_*.txt
+local_index_*.json
+local_results_*/
+tango_*_*.log
 
 # Per-investigation saved keyword lists
 local_keywords_*.txt

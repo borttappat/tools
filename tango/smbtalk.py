@@ -19,6 +19,7 @@ import magic
 
 from logger import create_logger
 from text_extractor import extract_text, TIKA_EXTENSIONS
+from metadata_extractor import extract_metadata, notable_fields
 import keywords as kwmod
 
 # Extensions handled by Tika (rich document formats)
@@ -27,7 +28,8 @@ RICH_DOC_EXTENSIONS = TIKA_EXTENSIONS
 
 class SMBTalker:
     def __init__(self, target_ip=None, filetypes=None, keywords_file=None,
-                 keywords_inline=None, override_filesize=None, keywords_saved=False):
+                 keywords_inline=None, override_filesize=None, keywords_saved=False,
+                 metadata_enabled=False):
         if target_ip is None:
             target_ip = self.detect_target_from_index()
 
@@ -39,6 +41,7 @@ class SMBTalker:
         self.keywords = self.parse_keywords(keywords_file, keywords_inline) if (keywords_file or keywords_inline) else []
         self.keywords_saved = keywords_saved
         self.max_filesize = self.parse_filesize_limit(override_filesize)
+        self.metadata_enabled = metadata_enabled
 
         self.index_data = None
         self.credentials = None
@@ -607,39 +610,12 @@ class SMBTalker:
                         f.write(f"{match['line_number']+1}: {match['context_after']}\n")
                     f.write("\n")
 
-                f.write("-" * 80 + "\n")
-                f.write("SUMMARY FOR THIS FILE:\n")
-
-                password_matches = [m for m in matches if 'pass' in m['matched_keyword']]
-                admin_matches = [m for m in matches if 'admin' in m['matched_keyword']]
-                key_matches = [m for m in matches if 'key' in m['matched_keyword']]
-
-                if password_matches:
-                    f.write(f"  Potential Credentials: {len(password_matches)} password fields found\n")
-                if admin_matches:
-                    f.write(f"  Admin Accounts: {len(admin_matches)} admin references\n")
-                if key_matches:
-                    f.write(f"  API Keys: {len(key_matches)} key references found\n")
-
-                if password_matches or key_matches:
-                    f.write("  Recommendation: HIGH PRIORITY - Contains potential credentials\n")
-                elif admin_matches:
-                    f.write("  Recommendation: MEDIUM PRIORITY - Contains admin references\n")
-                else:
-                    f.write("  Recommendation: LOW PRIORITY - Contains keyword matches\n")
-
-                f.write("-" * 80 + "\n\n")
-
             if files_with_matches > 1:
                 f.write("=" * 80 + "\n")
                 f.write("OVERALL SUMMARY\n")
                 f.write("=" * 80 + "\n\n")
                 f.write(f"Files with Findings: {files_with_matches}\n")
                 f.write(f"Total Matches: {total_matches}\n\n")
-                f.write("Recommended Actions:\n")
-                f.write("  1. Review all HIGH PRIORITY findings immediately\n")
-                f.write("  2. Rotate any credentials found\n")
-                f.write("  3. Audit configuration files for similar patterns\n\n")
 
             f.write("=" * 80 + "\n")
             f.write("End of Results\n")
@@ -648,6 +624,61 @@ class SMBTalker:
             f.write(f"Report generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC\n")
 
         return results_file
+
+    def generate_metadata_file(self, file_type, metadata_by_file):
+        """Write METADATA.txt and METADATA.json for a given file type."""
+        out_dir = f"{self.output_dir}/by_type/{file_type}"
+        os.makedirs(out_dir, exist_ok=True)
+
+        json_file = f"{out_dir}/METADATA.json"
+        with open(json_file, 'w', encoding='utf-8') as f:
+            json.dump(metadata_by_file, f, indent=2, default=str)
+
+        txt_file = f"{out_dir}/METADATA.txt"
+        with open(txt_file, 'w', encoding='utf-8') as f:
+            f.write("=" * 80 + "\n")
+            f.write("Tango Metadata Extraction Results\n")
+            f.write("=" * 80 + "\n")
+            f.write(f"File Type:      .{file_type}\n")
+            f.write(f"Target:         {self.target_ip}\n")
+            f.write(f"Scan Date:      {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC\n")
+            f.write(f"Files:          {len(metadata_by_file)}\n")
+            f.write("\n" + "=" * 80 + "\n\n")
+
+            for local_path, meta in metadata_by_file.items():
+                if not meta:
+                    continue
+                file_info = None
+                for df in self.downloaded_files:
+                    if df['local_path'] == local_path:
+                        file_info = df
+                        break
+
+                f.write("#" * 80 + "\n")
+                if file_info:
+                    f.write(f"FILE: {file_info['smb_path']}\n")
+                    f.write(f"LOCAL PATH: {local_path}\n")
+                else:
+                    f.write(f"FILE: {local_path}\n")
+                f.write("#" * 80 + "\n\n")
+
+                notable = notable_fields(meta)
+                if notable:
+                    f.write("Notable fields:\n")
+                    for tag, value in notable.items():
+                        f.write(f"  {tag}: {value}\n")
+                    f.write("\n")
+
+                f.write("All fields:\n")
+                for tag, value in meta.items():
+                    f.write(f"  {tag}: {value}\n")
+                f.write("\n")
+
+            f.write("=" * 80 + "\n")
+            f.write("End of Metadata\n")
+            f.write("=" * 80 + "\n")
+
+        return txt_file
 
     def format_size(self, size_bytes):
         if size_bytes == 0:
@@ -713,6 +744,7 @@ class SMBTalker:
                 os.makedirs(type_dir, exist_ok=True)
 
                 matches_by_file = {}
+                metadata_by_file = {}
 
                 for i, file_info in enumerate(files, 1):
                     file_basename = os.path.basename(file_info['path'].split('\\')[-1])
@@ -745,6 +777,11 @@ class SMBTalker:
                             self.download_stats['matches_found'] += len(matches)
                             self.logger.match(f"{file_basename} ({len(matches)} matches)")
 
+                        if self.metadata_enabled:
+                            meta = extract_metadata(local_path, self.logger)
+                            if meta:
+                                metadata_by_file[local_path] = meta
+
                         self.downloaded_files.append(download_record)
                         self.download_stats['downloaded_files'] += 1
                         self.download_stats['total_size'] += file_info['size']
@@ -757,6 +794,10 @@ class SMBTalker:
                 matches_found = sum(len(m) for m in matches_by_file.values())
                 files_matched = len([f for f, m in matches_by_file.items() if m])
                 self.logger.info(f"[RESULTS] .{file_type}: {matches_found} matches in {files_matched} files → {results_file}")
+
+                if metadata_by_file:
+                    metadata_file = self.generate_metadata_file(file_type, metadata_by_file)
+                    self.logger.info(f"[METADATA] {len(metadata_by_file)} files → {metadata_file}")
 
             duration = time.time() - self.start_time
             duration_str = f"{int(duration // 60)} minutes {int(duration % 60)} seconds"

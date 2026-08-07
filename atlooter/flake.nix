@@ -21,8 +21,48 @@
           rich
           pip
         ]);
+
+        mkCollector = { name, script }: pkgs.stdenv.mkDerivation {
+          pname = name;
+          version = "1.0.0";
+          src = ./scripts;
+
+          nativeBuildInputs = [ pkgs.makeWrapper ];
+
+          installPhase = ''
+            mkdir -p $out/share/atlooter $out/bin
+            cp -r . $out/share/atlooter/
+
+            makeWrapper ${pythonEnv}/bin/python3 $out/bin/${name} \
+              --add-flags "$out/share/atlooter/${script}"
+          '';
+
+          meta.mainProgram = name;
+        };
+
+        confluenceCollector = mkCollector {
+          name = "atlooter-confluence";
+          script = "run_confluence.py";
+        };
+
+        jiraCollector = mkCollector {
+          name = "atlooter-jira";
+          script = "run_jira.py";
+        };
       in
       {
+        packages = {
+          default = confluenceCollector;
+          confluence = confluenceCollector;
+          jira = jiraCollector;
+        };
+
+        apps = {
+          default = flake-utils.lib.mkApp { drv = confluenceCollector; };
+          confluence = flake-utils.lib.mkApp { drv = confluenceCollector; };
+          jira = flake-utils.lib.mkApp { drv = jiraCollector; };
+        };
+
         devShells.default = pkgs.mkShell {
           name = "atlooter";
 

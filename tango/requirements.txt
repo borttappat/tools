@@ -7,10 +7,12 @@ python-magic>=0.4.27
 # Terminal Colors
 colorama>=0.4.6
 
-# Archive Handling
-py7zr>=0.20.0
-
 # Apache Tika - rich document text extraction (PDF, Word, Excel, PowerPoint, etc.)
 # Requires Java (JRE 8+) to be installed on the system.
 # On first run, Tika will download its server JAR automatically (~60MB).
 tika>=2.6.0
+
+# PyExifTool - embedded file metadata extraction (EXIF/GPS, Office/PDF
+# authorship & revision history, timestamps, device info, etc.)
+# Requires the 'exiftool' binary to be installed on the system.
+pyexiftool>=0.5.6

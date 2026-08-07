@@ -21,20 +21,35 @@ It supports two source types:
 - **Local directories** - analyze file server dumps on disk (no authentication)
 
 Rich document formats (PDF, Word, Excel, PowerPoint) are parsed via Apache Tika.
+Embedded file metadata (authorship, GPS, software, revision history) can be
+extracted via ExifTool with `--metadata`.
 
 ---
 
 ## Installation
 
-### Nix (recommended)
+### Nix flake, no clone required (recommended)
+
+```bash
+nix run github:borttappat/tools?dir=tango -- local-walk /path/to/dump
+nix run github:borttappat/tools?dir=tango -- local-talk /path/to/dump --filetypes pdf,docx --metadata
+```
+
+Pulls a fully pinned environment (Python deps, Java, ExifTool, `strings`,
+archive tools, SMB client) straight from the flake: no cloning, no venv,
+no system package install.
+
+### Nix (local checkout)
 
 ```bash
 cd tango
-nix-shell
+nix develop      # drops into a dev shell with the same pinned environment
+# or
+nix run .        # build and run tango directly
 ```
 
-The shell hook creates a Python venv, installs all dependencies, and exports
-`JAVA_HOME` so Tika can start its server process.
+`nix-shell` still works too (see `shell.nix`) and additionally creates a
+Python venv on top for iterating on dependencies not yet pinned in the flake.
 
 ### Manual
 
@@ -44,13 +59,15 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 # System packages (Debian/Ubuntu)
-sudo apt install binutils libmagic1 default-jre
+sudo apt install binutils libmagic1 default-jre libimage-exiftool-perl
 
 # System packages (Arch)
-sudo pacman -S binutils file jre-openjdk
+sudo pacman -S binutils file jre-openjdk perl-image-exiftool
 ```
 
 > Tika downloads its server JAR (~60 MB) on first use. Java 8+ must be in PATH.
+> ExifTool is only needed for `--metadata`; without it, metadata extraction
+> falls back to Tika's (weaker) metadata output for the formats Tika parses.
 
 ---
 
@@ -68,6 +85,7 @@ python3 tango.py walk -t 10.0.0.5 -u admin -p 'P@ssw0rd' -d CORP
 python3 tango.py talk --filetypes txt,ini,xml,cfg
 python3 tango.py talk --filetypes pdf,docx,xlsx        # Tika extraction
 python3 tango.py talk --filetypes txt --keywords-inline "password,secret,token"
+python3 tango.py talk --filetypes pdf,docx,jpg --metadata   # + embedded file metadata
 
 # Auto-detect: runs walk if no index exists, talk if it does
 python3 tango.py -t 10.0.0.5 -u admin -p 'P@ssw0rd'
@@ -96,6 +114,7 @@ python3 tango.py local-walk /mnt/fileserver/dump
 python3 tango.py local-talk /mnt/fileserver/dump --filetypes pdf,docx,xlsx,txt
 python3 tango.py local-talk /mnt/fileserver/dump --keywords keywords.txt
 python3 tango.py local-talk /mnt/fileserver/dump --keywords-inline "password,secret"
+python3 tango.py local-talk /mnt/fileserver/dump --filetypes jpg,pdf,docx --metadata
 ```
 
 The `local-walk` and `local-talk` commands are independent - run walk first to
@@ -113,6 +132,8 @@ see what file types exist and how large they are, then pick what to search.
 | `smb_index_<ip>.json` | Machine-readable index (used by talk phase) |
 | `large_files_<ip>.txt` | Files over 50 MB, flagged for manual review |
 | `downloads_<ip>/by_type/<ext>/RESULTS.txt` | Keyword matches per file type |
+| `downloads_<ip>/by_type/<ext>/METADATA.txt` | Embedded file metadata (with `--metadata`) |
+| `downloads_<ip>/by_type/<ext>/METADATA.json` | Same, machine-readable |
 | `tango_<ip>_<timestamp>.log` | Full session log |
 
 ### Local mode
@@ -122,7 +143,29 @@ see what file types exist and how large they are, then pick what to search.
 | `local_index_<name>.txt` | Human-readable directory index |
 | `local_index_<name>.json` | Machine-readable index (used by local-talk) |
 | `local_results_<name>/by_type/<ext>/RESULTS.txt` | Keyword matches per file type |
+| `local_results_<name>/by_type/<ext>/METADATA.txt` | Embedded file metadata (with `--metadata`) |
+| `local_results_<name>/by_type/<ext>/METADATA.json` | Same, machine-readable |
 | `tango_<name>_<timestamp>.log` | Full session log |
+
+---
+
+## Metadata extraction
+
+Pass `--metadata` to `talk` or `local-talk` to pull embedded metadata out of
+every file that's searched, regardless of whether it contained a keyword
+match. This is driven by [ExifTool](https://exiftool.org/), which covers
+EXIF/GPS in images, authorship and revision history in Office docs and PDFs,
+device info, and thousands of other formats in one pass.
+
+Each `METADATA.txt`/`METADATA.json` pair calls out a "notable fields" subset
+first, things like `Author`, `LastModifiedBy`, `Company`, `Software`,
+`GPSLatitude`/`GPSLongitude`, `CreateDate`, before listing every raw tag
+ExifTool returned. These fields are often how you attribute a document to a
+specific person, workstation, or physical location.
+
+If ExifTool isn't installed, metadata extraction falls back to Apache Tika's
+metadata output for the formats Tika already parses (PDF, Office docs, etc.),
+weaker on images/GPS, but requires no extra dependency.
 
 ---
 
@@ -158,8 +201,8 @@ If neither flag is given, `talk`/`local-talk` show an interactive menu:
 
 1. Use the default keyword set as-is
 2. Use the default set plus extra keywords you type in
-3. Enter custom keywords manually (only those — no defaults mixed in)
-4. Load keywords from a file (only those — no defaults mixed in)
+3. Enter custom keywords manually (only those, no defaults mixed in)
+4. Load keywords from a file (only those, no defaults mixed in)
 5. Use the saved list for this investigation, if one exists
 6. Manage the saved list (view / add / remove / reset to defaults)
 
@@ -171,7 +214,7 @@ identifier used for the index file: `local_keywords_<name>.txt` next to
 `smb_index_<ip>.json`.
 
 Once a saved list exists, pass `--keywords-saved` to load it directly and
-skip the menu entirely — useful for repeat runs on the same case.
+skip the menu entirely, useful for repeat runs on the same case.
 
 ---
 
