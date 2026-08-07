@@ -9,7 +9,7 @@ CLI tools for extracting and exporting structured data from emails and documents
 Export PST/OST/PAB (Outlook) files to a clean directory structure.
 
 ```bash
-./pst-export <mail.pst> [output_dir]
+./pst-export mail.pst ./output
 ```
 
 Internally this runs `pffexport` (from libpff) to do the actual PST parsing,
@@ -50,11 +50,28 @@ not indexed in `manifest.txt`.
 
 Universal document extractor for CLI.
 
+Extract text from a file:
+
 ```bash
-./exfil <file>                    # Extract text from file
-./exfil -r <dir>                  # Recursive extraction
-./exfil -g "pattern" <file>       # Grep for pattern
-./exfil -g "p" -r <dir>           # Grep recursively
+./exfil document.pdf
+```
+
+Recursive extraction:
+
+```bash
+./exfil -r ./some_dir/
+```
+
+Grep for a pattern in a single file:
+
+```bash
+./exfil -g "pattern" document.pdf
+```
+
+Grep recursively:
+
+```bash
+./exfil -g "pattern" -r ./some_dir/
 ```
 
 **Supported formats:**
@@ -76,14 +93,21 @@ headers/bodies to stdout so it greps and pipes like every other format here.
 
 ## Workflow
 
+Export PST to structured format:
+
 ```bash
-# 1. Export PST to structured format
 ./pst-export exchange.pst ./out
+```
 
-# 2. Grep through extracted emails
+Grep through extracted emails:
+
+```bash
 ./exfil -g "invoice" -r ./out/emails/
+```
 
-# 3. Find attachments
+Find attachments:
+
+```bash
 find ./out/attachments/pdf -name "*report*"
 ```
 
@@ -92,8 +116,11 @@ find ./out/attachments/pdf -name "*report*"
 ### Nix flake, no clone required (recommended)
 
 ```bash
-nix run github:borttappat/tools?dir=postman-drat#pst-export -- mail.pst ./output
-nix run github:borttappat/tools?dir=postman-drat#exfil -- -g "invoice" -r ./output/emails/
+nix run "github:borttappat/tools?dir=postman-drat#pst-export" -- mail.pst ./output
+```
+
+```bash
+nix run "github:borttappat/tools?dir=postman-drat#exfil" -- -g "invoice" -r ./output/emails/
 ```
 
 Pulls a fully pinned environment (Python + openpyxl/python-docx/python-pptx,
@@ -104,8 +131,19 @@ system package install.
 
 ```bash
 cd postman-drat
-nix develop      # drops into a dev shell with the same pinned environment
+```
+
+Drops into a dev shell with the same pinned environment:
+
+```bash
+nix develop
+```
+
+```bash
 chmod +x pst-export exfil
+```
+
+```bash
 ./pst-export mail.pst ./output
 ```
 
@@ -114,18 +152,24 @@ chmod +x pst-export exfil
 
 ### Manual Installation
 
-Without Nix, install dependencies manually:
+Without Nix, install dependencies manually. System packages (macOS/Homebrew example):
 
 ```bash
-# Install system packages (macOS/Homebrew example)
 brew install pandoc poppler libpff
+```
 
-# Install Python packages
+Python packages:
+
+```bash
 pip install -r requirements.txt
 ```
 
 Then run the tools directly:
+
 ```bash
 ./pst-export mail.pst ./output
+```
+
+```bash
 ./exfil document.pdf
 ```

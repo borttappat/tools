@@ -10,17 +10,31 @@ wrapping (collection timestamp, request log, tool version) for integrity.
 
 ## Quick start
 
+### Nix flake, no clone required (recommended)
+
+The collector config isn't bundled into the nix package, so you need one
+small local YAML file per service (not a clone, just a placeholder, since
+all real credentials come from env vars regardless of file content):
+
 ```bash
-nix-shell
+echo 'confluence: {}' > confluence_config.yaml
 ```
 
-Set credentials:
+```bash
+echo 'jira: {}' > jira_config.yaml
+```
+
+Set Confluence credentials:
 
 ```bash
 export CONFLUENCE_URL="https://your-domain.atlassian.net"
 export CONFLUENCE_EMAIL="your-email@company.com"
 export CONFLUENCE_TOKEN="your-api-token"
+```
 
+Set Jira credentials:
+
+```bash
 export JIRA_URL="https://your-domain.atlassian.net"
 export JIRA_EMAIL="your-email@company.com"
 export JIRA_TOKEN="your-api-token"
@@ -31,14 +45,43 @@ Get an API token at: https://id.atlassian.com/manage-profile/security/api-tokens
 Run:
 
 ```bash
-python scripts/run_confluence.py --config config/confluence_config.yaml
-python scripts/run_jira.py --config config/jira_config.yaml
-
-# Limit scope
-python scripts/run_confluence.py --spaces DEMO DOC
-python scripts/run_jira.py --projects PROJ1 PROJ2
-python scripts/run_jira.py --jql "project = PROJ AND created >= '2024-01-01'"
+nix run "github:borttappat/tools?dir=atlooter#confluence" -- --config confluence_config.yaml
 ```
+
+```bash
+nix run "github:borttappat/tools?dir=atlooter#jira" -- --config jira_config.yaml
+```
+
+Limit scope:
+
+```bash
+nix run "github:borttappat/tools?dir=atlooter#confluence" -- --config confluence_config.yaml --spaces DEMO DOC
+```
+
+```bash
+nix run "github:borttappat/tools?dir=atlooter#jira" -- --config jira_config.yaml --projects PROJ1 PROJ2
+```
+
+```bash
+nix run "github:borttappat/tools?dir=atlooter#jira" -- --config jira_config.yaml --jql "project = PROJ AND created >= '2024-01-01'"
+```
+
+### Nix (local checkout)
+
+```bash
+cd atlooter
+nix develop
+```
+
+```bash
+python scripts/run_confluence.py --config config/confluence_config.yaml
+```
+
+```bash
+python scripts/run_jira.py --config config/jira_config.yaml
+```
+
+`nix-shell` still works too (see `shell.nix`), using the same pinned packages.
 
 ---
 

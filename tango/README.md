@@ -31,8 +31,11 @@ extracted via ExifTool with `--metadata`.
 ### Nix flake, no clone required (recommended)
 
 ```bash
-nix run github:borttappat/tools?dir=tango -- local-walk /path/to/dump
-nix run github:borttappat/tools?dir=tango -- local-talk /path/to/dump --filetypes pdf,docx --metadata
+nix run "github:borttappat/tools?dir=tango" -- local-walk /path/to/dump
+```
+
+```bash
+nix run "github:borttappat/tools?dir=tango" -- local-talk /path/to/dump --filetypes pdf,docx --metadata
 ```
 
 Pulls a fully pinned environment (Python deps, Java, ExifTool, `strings`,
@@ -43,9 +46,18 @@ no system package install.
 
 ```bash
 cd tango
-nix develop      # drops into a dev shell with the same pinned environment
-# or
-nix run .        # build and run tango directly
+```
+
+Drops into a dev shell with the same pinned environment:
+
+```bash
+nix develop
+```
+
+Or build and run tango directly:
+
+```bash
+nix run .
 ```
 
 `nix-shell` still works too (see `shell.nix`) and additionally creates a
@@ -57,11 +69,17 @@ Python venv on top for iterating on dependencies not yet pinned in the flake.
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+```
 
-# System packages (Debian/Ubuntu)
+System packages, Debian/Ubuntu:
+
+```bash
 sudo apt install binutils libmagic1 default-jre libimage-exiftool-perl
+```
 
-# System packages (Arch)
+System packages, Arch:
+
+```bash
 sudo pacman -S binutils file jre-openjdk perl-image-exiftool
 ```
 
@@ -75,22 +93,45 @@ sudo pacman -S binutils file jre-openjdk perl-image-exiftool
 
 ### SMB mode
 
-Index an SMB share, then search the downloaded files:
+Index an SMB share, then search the downloaded files.
+
+Phase 1: walk (index shares and file metadata):
 
 ```bash
-# Phase 1: walk (index shares and file metadata)
 python3 tango.py walk -t 10.0.0.5 -u admin -p 'P@ssw0rd' -d CORP
+```
 
-# Phase 2: talk (download selected file types and search for keywords)
+Phase 2: talk (download selected file types and search for keywords):
+
+```bash
 python3 tango.py talk --filetypes txt,ini,xml,cfg
-python3 tango.py talk --filetypes pdf,docx,xlsx        # Tika extraction
+```
+
+Rich documents go through Tika extraction:
+
+```bash
+python3 tango.py talk --filetypes pdf,docx,xlsx
+```
+
+```bash
 python3 tango.py talk --filetypes txt --keywords-inline "password,secret,token"
-python3 tango.py talk --filetypes pdf,docx,jpg --metadata   # + embedded file metadata
+```
 
-# Auto-detect: runs walk if no index exists, talk if it does
+Add embedded file metadata alongside the keyword search:
+
+```bash
+python3 tango.py talk --filetypes pdf,docx,jpg --metadata
+```
+
+Auto-detect runs walk if no index exists, talk if it does:
+
+```bash
 python3 tango.py -t 10.0.0.5 -u admin -p 'P@ssw0rd'
+```
 
-# Combined: walk then talk in one go
+Combined mode runs walk then talk in one go:
+
+```bash
 python3 tango.py -t 10.0.0.5 -u admin -p 'P@ssw0rd' --filetypes txt,ini,pdf
 ```
 
@@ -104,16 +145,31 @@ Optional SMB flags:
 
 ### Local mode
 
-Analyze a directory dump without any authentication:
+Analyze a directory dump without any authentication.
+
+Phase 1: index the directory tree:
 
 ```bash
-# Phase 1: index the directory tree
 python3 tango.py local-walk /mnt/fileserver/dump
+```
 
-# Phase 2: search indexed files for keywords
+Phase 2: search indexed files for keywords:
+
+```bash
 python3 tango.py local-talk /mnt/fileserver/dump --filetypes pdf,docx,xlsx,txt
+```
+
+```bash
 python3 tango.py local-talk /mnt/fileserver/dump --keywords keywords.txt
+```
+
+```bash
 python3 tango.py local-talk /mnt/fileserver/dump --keywords-inline "password,secret"
+```
+
+Add embedded file metadata alongside the keyword search:
+
+```bash
 python3 tango.py local-talk /mnt/fileserver/dump --filetypes jpg,pdf,docx --metadata
 ```
 
