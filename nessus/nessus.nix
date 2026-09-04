@@ -77,7 +77,7 @@ in {
 
           if ${pkgs.docker}/bin/docker inspect ${cfg.containerName} >/dev/null 2>&1; then
             echo "Starting existing Nessus container..."
-            sudo ${pkgs.docker}/bin/docker start ${cfg.containerName}
+            sudo ${pkgs.docker}/bin/docker start ${cfg.containerName} >/dev/null
           else
             echo "Creating Nessus container (first run)..."
             ${
@@ -89,22 +89,25 @@ in {
                 -e ACTIVATION_CODE="$(cat ${cfg.credentialsDir}/activation_code)" \
                 -e USERNAME="$(cat ${cfg.credentialsDir}/admin_username)" \
                 -e PASSWORD="$(cat ${cfg.credentialsDir}/admin_password)" \
-                ${cfg.image}
+                ${cfg.image} >/dev/null
             ''
             else ''
               sudo ${pkgs.docker}/bin/docker run -d \
                 --name ${cfg.containerName} \
                 -p ${toString cfg.port}:8834 \
-                ${cfg.image}
+                ${cfg.image} >/dev/null
             ''
           }
           fi
 
           echo "Nessus: https://localhost:${toString cfg.port}"
+          echo "To stop: nessus-stop"
         '')
 
         (pkgs.writeShellScriptBin "nessus-stop" ''
-          sudo ${pkgs.docker}/bin/docker stop ${cfg.containerName}
+          echo "Stopping Nessus..."
+          sudo ${pkgs.docker}/bin/docker stop ${cfg.containerName} >/dev/null
+          echo "Nessus stopped. To start it again: nessus-start"
         '')
 
         (pkgs.writeShellScriptBin "nessus-status" ''

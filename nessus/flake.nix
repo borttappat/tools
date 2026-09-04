@@ -28,10 +28,25 @@
       # setuid wrapper at /run/wrappers/bin/sudo, found via $PATH. The raw
       # nixpkgs store binary is never setuid and always fails with "must be
       # owned by uid 0 and have the setuid bit set".
+      # This flake ships the Docker *client* (pkgs.docker) so the wrapper
+      # scripts always have something to invoke, but it does not install or
+      # start a Docker *daemon* -- that has to already exist on the host
+      # (Docker Engine, Docker Desktop, or a compatible socket such as
+      # rootless Podman). dockerCmd resolves DOCKER to a working invocation
+      # (plain, or sudo-prefixed for a socket the caller can't reach
+      # directly), and exits with a clear message up front if neither
+      # reaches a live daemon at all, instead of letting a later `docker
+      # run` fail with a raw connection-refused error.
       dockerCmd = ''
         DOCKER="${pkgs.docker}/bin/docker"
         if ! "$DOCKER" info >/dev/null 2>&1; then
           DOCKER="sudo $DOCKER"
+        fi
+        if ! $DOCKER info >/dev/null 2>&1; then
+          echo "Error: could not reach a Docker daemon (tried directly and with sudo)." >&2
+          echo "This tool needs Docker (or a compatible daemon, e.g. rootless Podman exposing a docker socket) already installed and running on this machine." >&2
+          echo "  systemd-based Linux: sudo systemctl start docker" >&2
+          exit 1
         fi
       '';
 
@@ -46,7 +61,7 @@
 
         if $DOCKER inspect "$NESSUS_CONTAINER" >/dev/null 2>&1; then
           echo "Starting existing Nessus container..."
-          $DOCKER start "$NESSUS_CONTAINER"
+          $DOCKER start "$NESSUS_CONTAINER" >/dev/null
         else
           echo "Creating Nessus container (first run)..."
           if [ -n "''${NESSUS_CREDENTIALS_DIR:-}" ]; then
@@ -56,23 +71,26 @@
               -e ACTIVATION_CODE="$(cat "$NESSUS_CREDENTIALS_DIR/activation_code")" \
               -e USERNAME="$(cat "$NESSUS_CREDENTIALS_DIR/admin_username")" \
               -e PASSWORD="$(cat "$NESSUS_CREDENTIALS_DIR/admin_password")" \
-              "$NESSUS_IMAGE"
+              "$NESSUS_IMAGE" >/dev/null
           else
             $DOCKER run -d \
               --name "$NESSUS_CONTAINER" \
               -p "$NESSUS_PORT:8834" \
-              "$NESSUS_IMAGE"
+              "$NESSUS_IMAGE" >/dev/null
           fi
         fi
 
         echo "Nessus: https://localhost:$NESSUS_PORT"
+        echo "To stop: nix run \"github:borttappat/tools?dir=nessus#nessus-stop\""
       '';
 
       nessusStop = pkgs.writeShellScriptBin "nessus-stop" ''
         set -e
         ${dockerCmd}
         NESSUS_CONTAINER="''${NESSUS_CONTAINER:-nessus}"
-        $DOCKER stop "$NESSUS_CONTAINER"
+        echo "Stopping Nessus..."
+        $DOCKER stop "$NESSUS_CONTAINER" >/dev/null
+        echo "Nessus stopped. To start it again: nix run \"github:borttappat/tools?dir=nessus\""
       '';
     in {
       packages.default = nessusStart;
