@@ -91,3 +91,23 @@ nix run "github:borttappat/tools?dir=postman-drat#exfil" -- -g "password" -r ./o
 ```
 
 See `postman-drat/README.md` for full usage.
+
+---
+
+## nessus
+
+Nessus Professional (Tenable's official Docker image) as a reusable NixOS
+module, plus a standalone launcher for any machine already running Docker.
+
+```bash
+nix run "github:borttappat/tools?dir=nessus"
+```
+
+Or as a NixOS module:
+
+```nix
+imports = [ (builtins.getFlake "github:borttappat/tools?dir=nessus").nixosModules.default ];
+nessus.enable = true;
+```
+
+See `nessus/README.md` for full usage.
