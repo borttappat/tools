@@ -21,8 +21,27 @@ nix run "github:borttappat/tools?dir=nessus"
 nix run "github:borttappat/tools?dir=nessus#nessus-stop"
 ```
 
+This flake ships the Docker *client* so the commands above always have
+something to invoke, but it does not install or start a Docker *daemon* --
+that has to already be running on the machine (Docker Engine, Docker
+Desktop, or a compatible socket such as rootless Podman). If your user can
+already talk to the Docker socket directly (e.g. in the `docker` group), it
+runs unprivileged; otherwise it falls back to `sudo` automatically and may
+prompt for a password. If no daemon is reachable either way, it exits early
+with a clear error instead of a raw connection-refused message. Each command
+also prints how to reverse it (`nessus-start` prints the stop command,
+`nessus-stop` prints the start command).
+
 Override defaults with env vars: `NESSUS_IMAGE`, `NESSUS_CONTAINER`,
 `NESSUS_PORT`, `NESSUS_CREDENTIALS_DIR`.
+
+`nix run "github:..."` without a pinned revision caches the resolved commit
+for up to an hour. If you just pushed a change and `nix run` still seems to
+be running the old version, add `--refresh`:
+
+```bash
+nix run --refresh "github:borttappat/tools?dir=nessus"
+```
 
 ## As a NixOS module
 
