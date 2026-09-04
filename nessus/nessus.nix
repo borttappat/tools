@@ -69,17 +69,21 @@ in {
         (pkgs.writeShellScriptBin "nessus-start" ''
           set -e
 
-          ${pkgs.sudo}/bin/sudo ${pkgs.systemd}/bin/systemctl start docker
+          # Bare "sudo", not ''${pkgs.sudo}/bin/sudo: NixOS's usable sudo is
+          # the setuid wrapper at /run/wrappers/bin/sudo, found via $PATH.
+          # The raw nixpkgs store binary is never setuid and always fails
+          # with "must be owned by uid 0 and have the setuid bit set".
+          sudo ${pkgs.systemd}/bin/systemctl start docker
 
           if ${pkgs.docker}/bin/docker inspect ${cfg.containerName} >/dev/null 2>&1; then
             echo "Starting existing Nessus container..."
-            ${pkgs.sudo}/bin/sudo ${pkgs.docker}/bin/docker start ${cfg.containerName}
+            sudo ${pkgs.docker}/bin/docker start ${cfg.containerName}
           else
             echo "Creating Nessus container (first run)..."
             ${
             if cfg.credentialsDir != null
             then ''
-              ${pkgs.sudo}/bin/sudo ${pkgs.docker}/bin/docker run -d \
+              sudo ${pkgs.docker}/bin/docker run -d \
                 --name ${cfg.containerName} \
                 -p ${toString cfg.port}:8834 \
                 -e ACTIVATION_CODE="$(cat ${cfg.credentialsDir}/activation_code)" \
@@ -88,7 +92,7 @@ in {
                 ${cfg.image}
             ''
             else ''
-              ${pkgs.sudo}/bin/sudo ${pkgs.docker}/bin/docker run -d \
+              sudo ${pkgs.docker}/bin/docker run -d \
                 --name ${cfg.containerName} \
                 -p ${toString cfg.port}:8834 \
                 ${cfg.image}
@@ -100,7 +104,7 @@ in {
         '')
 
         (pkgs.writeShellScriptBin "nessus-stop" ''
-          ${pkgs.sudo}/bin/sudo ${pkgs.docker}/bin/docker stop ${cfg.containerName}
+          sudo ${pkgs.docker}/bin/docker stop ${cfg.containerName}
         '')
 
         (pkgs.writeShellScriptBin "nessus-status" ''

@@ -24,10 +24,14 @@
       # Talk to the Docker socket directly when the invoking user already
       # has access (e.g. in the "docker" group); fall back to sudo when
       # they don't, rather than failing outright with a permission error.
+      # Bare "sudo" (not ''${pkgs.sudo}/bin/sudo): NixOS's usable sudo is the
+      # setuid wrapper at /run/wrappers/bin/sudo, found via $PATH. The raw
+      # nixpkgs store binary is never setuid and always fails with "must be
+      # owned by uid 0 and have the setuid bit set".
       dockerCmd = ''
         DOCKER="${pkgs.docker}/bin/docker"
         if ! "$DOCKER" info >/dev/null 2>&1; then
-          DOCKER="${pkgs.sudo}/bin/sudo $DOCKER"
+          DOCKER="sudo $DOCKER"
         fi
       '';
 
