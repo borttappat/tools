@@ -5,21 +5,17 @@ A shell for giving terminal presentations with
 [pywal](https://github.com/dylanaraps/pywal) colors if you have any.
 
 ```bash
-nix run "github:borttappat/tools?dir=slides" -- talk.md
+nix run "github:borttappat/tools?dir=slides"
 ```
 
-This opens your own `$SHELL` in the file's directory and prints a short help
-text. Inside the shell:
+This opens your own `$SHELL` in the current directory with the tools on
+`PATH` and prints a short help text. Inside the shell:
 
 | Command | What it does |
 |---|---|
-| `present` | Presents the file you passed to `nix run` |
-| `present <file.md>` | Presents any other markdown file |
+| `present <file.md>` | Presents a markdown file |
 | `slides-help` | Prints the help text again |
 | `exit` | Leaves the shell |
-
-You can also pass a directory instead of a file (or nothing, which means the
-current directory). `present` then needs a file argument.
 
 To present a file directly without the shell:
 
