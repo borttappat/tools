@@ -181,24 +181,43 @@
         echo "Data is preserved across stops. Full reset: nix run \"github:borttappat/tools?dir=bloodhound-ce#bloodhound-wipe\""
         echo "Press Ctrl+C to stop."
 
+        # First Ctrl+C surfaces the y/N prompt below. The trap stays armed
+        # while that prompt is waiting on input too, so an impatient second
+        # Ctrl+C there doesn't just abandon the containers running (as a
+        # disabled-during-read trap would) -- it decisively stops instead of
+        # requiring an answer.
+        sigint_count=0
+        do_stop() {
+          echo ""
+          echo "Stopping BloodHound CE..."
+          $DOCKER stop "$PG_CONTAINER" "$NEO4J_CONTAINER" "$BH_CONTAINER" >/dev/null
+          echo "Stopped. Data preserved; start again: nix run \"github:borttappat/tools?dir=bloodhound-ce\""
+          exit 0
+        }
+        handle_signal() {
+          sigint_count=$((sigint_count + 1))
+          if [ "$sigint_count" -ge 2 ]; then
+            do_stop
+          fi
+          stop_requested=1
+        }
+        trap handle_signal INT TERM
+
         while true; do
           stop_requested=""
-          trap 'stop_requested=1' INT TERM
           while [ -z "$stop_requested" ]; do
             sleep 1 || true
           done
-          trap - INT TERM
           printf "\nStop BloodHound CE? Containers stop, data is preserved. [y/N] "
           read -r reply < /dev/tty || true
           case "$reply" in
-            y | Y) break ;;
-            *) echo "Resuming. Press Ctrl+C to stop." ;;
+            y | Y) do_stop ;;
+            *)
+              sigint_count=0
+              echo "Resuming. Press Ctrl+C to stop."
+              ;;
           esac
         done
-
-        echo "Stopping BloodHound CE..."
-        $DOCKER stop "$PG_CONTAINER" "$NEO4J_CONTAINER" "$BH_CONTAINER" >/dev/null
-        echo "Stopped. Data preserved; start again: nix run \"github:borttappat/tools?dir=bloodhound-ce\""
       '';
 
       bloodhoundDetach = pkgs.writeShellScriptBin "bloodhound-detach" ''
