@@ -144,17 +144,61 @@
         echo "BloodHound CE: http://127.0.0.1:$BLOODHOUND_PORT/ui/login"
       '';
 
+      # The admin password is only ever printed once, in the BloodHound
+      # container's own boxed log message, on the boot that first creates
+      # the account. "docker logs" replays the full retained history of a
+      # container (not just new output), so this still finds it on a restart
+      # of an existing container -- only a wipe + fresh container regenerates
+      # it. Swallow a no-match grep (exit 1) each attempt; only give up
+      # after the retry budget.
+      waitForPassword = ''
+        echo "Waiting for the initial admin password (only printed once, on first boot)..."
+        PASSWORD_BOX=""
+        for i in $(seq 1 60); do
+          PASSWORD_BOX=$($DOCKER logs "$BH_CONTAINER" 2>&1 | grep -B2 -A2 -m1 "Initial Password Set To" || true)
+          [ -n "$PASSWORD_BOX" ] && break
+          sleep 2
+        done
+      '';
+
       bloodhoundStart = pkgs.writeShellScriptBin "bloodhound-start" ''
         set -e
         ${dockerCmd}
         ${env}
         ${ensureNetwork}
         ${startStack}
-        echo "Attached to BloodHound container logs -- Ctrl+C stops the stack (data is preserved)."
-        echo "Postgres/Neo4j logs: docker logs $PG_CONTAINER / docker logs $NEO4J_CONTAINER"
-        echo "Full reset: nix run \"github:borttappat/tools?dir=bloodhound-ce#bloodhound-wipe\""
-        trap '$DOCKER stop "$PG_CONTAINER" "$NEO4J_CONTAINER" "$BH_CONTAINER" >/dev/null; echo "BloodHound CE stopped."' EXIT
-        $DOCKER logs -f "$BH_CONTAINER"
+        ${waitForPassword}
+
+        printf '\033[2J\033[H'
+        echo "BloodHound CE: http://127.0.0.1:$BLOODHOUND_PORT/ui/login"
+        echo ""
+        if [ -n "$PASSWORD_BOX" ]; then
+          echo "$PASSWORD_BOX"
+        else
+          echo "Admin password not found in logs (already created earlier, or check: docker logs $BH_CONTAINER)"
+        fi
+        echo ""
+        echo "Data is preserved across stops. Full reset: nix run \"github:borttappat/tools?dir=bloodhound-ce#bloodhound-wipe\""
+        echo "Press Ctrl+C to stop."
+
+        while true; do
+          stop_requested=""
+          trap 'stop_requested=1' INT TERM
+          while [ -z "$stop_requested" ]; do
+            sleep 1 || true
+          done
+          trap - INT TERM
+          printf "\nStop BloodHound CE? Containers stop, data is preserved. [y/N] "
+          read -r reply < /dev/tty || true
+          case "$reply" in
+            y | Y) break ;;
+            *) echo "Resuming. Press Ctrl+C to stop." ;;
+          esac
+        done
+
+        echo "Stopping BloodHound CE..."
+        $DOCKER stop "$PG_CONTAINER" "$NEO4J_CONTAINER" "$BH_CONTAINER" >/dev/null
+        echo "Stopped. Data preserved; start again: nix run \"github:borttappat/tools?dir=bloodhound-ce\""
       '';
 
       bloodhoundDetach = pkgs.writeShellScriptBin "bloodhound-detach" ''
@@ -163,6 +207,15 @@
         ${env}
         ${ensureNetwork}
         ${startStack}
+        ${waitForPassword}
+
+        echo ""
+        if [ -n "$PASSWORD_BOX" ]; then
+          echo "$PASSWORD_BOX"
+        else
+          echo "Admin password not found in logs (already created earlier, or check: docker logs $BH_CONTAINER)"
+        fi
+        echo ""
         echo "Running in the background."
         echo "Stop: nix run \"github:borttappat/tools?dir=bloodhound-ce#bloodhound-stop\""
       '';
