@@ -111,3 +111,17 @@ nessus.enable = true;
 ```
 
 See `nessus/README.md` for full usage.
+
+---
+
+## slides
+
+A shell for giving terminal presentations with `slides`, themed from your
+current pywal colors if you have any. It opens in the file's directory and
+prints a short help text.
+
+```bash
+nix run "github:borttappat/tools?dir=slides" -- talk.md
+```
+
+Then run `present` inside the shell. See `slides/README.md` for full usage.
