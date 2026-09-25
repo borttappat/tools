@@ -114,6 +114,25 @@ See `nessus/README.md` for full usage.
 
 ---
 
+## bloodhound-ce
+
+BloodHound CE (SpecterOps' AD/Entra attack-path analysis tool), run via
+Docker, same daemon-preflight/sudo-fallback pattern as `nessus`.
+
+```bash
+nix run "github:borttappat/tools?dir=bloodhound-ce"
+```
+
+Ctrl+C stops it cleanly with data preserved. Full reset:
+
+```bash
+nix run "github:borttappat/tools?dir=bloodhound-ce#bloodhound-wipe"
+```
+
+See `bloodhound-ce/README.md` for full usage.
+
+---
+
 ## slides
 
 A shell for giving terminal presentations with `slides`, themed from your
