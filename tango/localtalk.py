@@ -19,6 +19,7 @@ from logger import create_logger
 from text_extractor import extract_text, TIKA_EXTENSIONS
 from metadata_extractor import extract_metadata, notable_fields
 import keywords as kwmod
+from pause import PauseHandler, save_checkpoint, load_checkpoint, remove_checkpoint
 
 TEXT_EXTENSIONS = {
     'txt', 'ini', 'cfg', 'conf', 'log', 'xml', 'json', 'yaml', 'yml',
@@ -36,7 +37,7 @@ BINARY_EXTENSIONS = {'exe', 'dll', 'msi', 'bin', 'so', 'dylib'}
 class LocalAnalyzer:
     def __init__(self, root_path, filetypes=None, keywords_file=None,
                  keywords_inline=None, override_filesize=None, keywords_saved=False,
-                 metadata_enabled=False):
+                 metadata_enabled=False, fresh=False):
         self.root_path = Path(root_path).resolve()
         self.name = self.root_path.name
         self.logger = create_logger(self.name, "local-talk")
@@ -47,6 +48,7 @@ class LocalAnalyzer:
         self.keywords_saved = keywords_saved
         self.max_filesize = self._parse_filesize_limit(override_filesize)
         self.metadata_enabled = metadata_enabled
+        self.fresh = fresh
 
         self.index_data = None
         self.output_dir = f"local_results_{self.name}"
@@ -58,6 +60,13 @@ class LocalAnalyzer:
             "files_with_matches": 0,
             "total_matches": 0
         }
+
+        self.checkpoint_path = f"local_checkpoint_{self.name}.json"
+        self.resumed = False
+        self.processed_paths = set()
+        self.matches_by_type = {}
+        self.metadata_by_type = {}
+        self.pause_handler = None
 
     # -------------------------------------------------------------------------
     # Helpers
@@ -128,6 +137,59 @@ class LocalAnalyzer:
         except Exception as e:
             self.logger.critical(f"Failed to load index: {e}")
             return False
+
+    # -------------------------------------------------------------------------
+    # Pause / resume
+    # -------------------------------------------------------------------------
+
+    def try_resume(self):
+        """Load a paused checkpoint for this path, if one exists and --fresh wasn't given.
+
+        Returns True if a checkpoint was loaded (selection/keywords/progress restored
+        and the interactive prompts should be skipped), False otherwise.
+        """
+        if self.fresh:
+            remove_checkpoint(self.checkpoint_path)
+            return False
+
+        checkpoint = load_checkpoint(self.checkpoint_path, self.logger)
+        if not checkpoint:
+            return False
+
+        self.selected_filetypes = checkpoint.get('filetypes') or self.selected_filetypes
+        self.keywords = checkpoint.get('keywords') or self.keywords
+        self.max_filesize = checkpoint.get('max_filesize', self.max_filesize)
+        self.metadata_enabled = checkpoint.get('metadata_enabled', self.metadata_enabled)
+        self.stats = checkpoint.get('stats', self.stats)
+        self.processed_paths = set(checkpoint.get('processed_paths', []))
+        self.matches_by_type = checkpoint.get('matches_by_type', {})
+        self.metadata_by_type = checkpoint.get('metadata_by_type', {})
+        self.resumed = True
+
+        self.logger.info(
+            f"Found a paused session: {len(self.processed_paths)} files already processed. "
+            f"Resuming with its original file types and keywords (use --fresh to start over)."
+        )
+        return True
+
+    def write_checkpoint(self):
+        """Persist current progress so a kill/Ctrl+C can be resumed later."""
+        save_checkpoint(self.checkpoint_path, {
+            "version": 1,
+            "root_path": str(self.root_path),
+            "filetypes": self.selected_filetypes,
+            "keywords": self.keywords,
+            "max_filesize": self.max_filesize,
+            "metadata_enabled": self.metadata_enabled,
+            "stats": self.stats,
+            "processed_paths": sorted(self.processed_paths),
+            "matches_by_type": self.matches_by_type,
+            "metadata_by_type": self.metadata_by_type,
+        })
+
+    def progress_note(self, total):
+        return (f"{len(self.processed_paths)}/{total} files done, "
+                f"{self.stats['total_matches']} matches so far.")
 
     # -------------------------------------------------------------------------
     # Interactive selections
@@ -495,19 +557,23 @@ class LocalAnalyzer:
 
     def analyze(self):
         """Main local-talk execution."""
+        self.pause_handler = PauseHandler()
         try:
             if not self.load_index():
                 return False
 
-            self.selected_filetypes = self.interactive_filetype_selection()
-            if not self.selected_filetypes:
-                self.logger.info("No file types selected.")
-                return False
+            if self.try_resume():
+                pass
+            else:
+                self.selected_filetypes = self.interactive_filetype_selection()
+                if not self.selected_filetypes:
+                    self.logger.info("No file types selected.")
+                    return False
 
-            self.keywords = self.interactive_keyword_input()
-            if not self.keywords:
-                self.logger.info("No keywords provided.")
-                return False
+                self.keywords = self.interactive_keyword_input()
+                if not self.keywords:
+                    self.logger.info("No keywords provided.")
+                    return False
 
             os.makedirs(self.output_dir, exist_ok=True)
             os.makedirs(f"{self.output_dir}/by_type", exist_ok=True)
@@ -539,27 +605,35 @@ class LocalAnalyzer:
             for fi in selected_files:
                 files_by_type[fi['extension']].append(fi)
 
+            quit_requested = False
+
             for file_type, files in files_by_type.items():
                 self.logger.info(f"\n[SEARCH] .{file_type} ({len(files)} files)")
 
-                matches_by_file = {}
-                metadata_by_file = {}
+                matches_by_file = self.matches_by_type.setdefault(file_type, {})
+                metadata_by_file = self.metadata_by_type.setdefault(file_type, {})
 
                 for i, fi in enumerate(files, 1):
                     file_path = fi['path']
 
+                    if file_path in self.processed_paths:
+                        continue
+
                     if not os.path.exists(file_path):
                         self.logger.warning(f"File no longer exists: {file_path}")
+                        self.processed_paths.add(file_path)
                         continue
 
                     size = fi.get('size', 0)
                     if size > self.max_filesize:
                         self.stats['skipped_size'] += 1
+                        self.processed_paths.add(file_path)
                         continue
 
                     matches = self.search_file(file_path)
                     if matches is None:
                         self.stats['skipped_size'] += 1
+                        self.processed_paths.add(file_path)
                         continue
 
                     matches_by_file[file_path] = matches
@@ -575,9 +649,21 @@ class LocalAnalyzer:
                         if meta:
                             metadata_by_file[file_path] = meta
 
+                    self.processed_paths.add(file_path)
+                    self.write_checkpoint()
+
                     if i % 50 == 0 or i == len(files):
                         pct = (i / len(files)) * 100
                         self.logger.info(f"  Progress: {i}/{len(files)} ({pct:.0f}%)")
+
+                    if self.pause_handler.check(self.progress_note(len(selected_files))) == "quit":
+                        quit_requested = True
+                        break
+
+                if quit_requested:
+                    self.logger.info("Paused session saved. Resume by rerunning the same command "
+                                      f"(or use --fresh to start over). Checkpoint: {self.checkpoint_path}")
+                    break
 
                 if matches_by_file:
                     results_file = self.generate_results_file(file_type, matches_by_file)
@@ -588,6 +674,11 @@ class LocalAnalyzer:
                 if metadata_by_file:
                     metadata_file = self.generate_metadata_file(file_type, metadata_by_file)
                     self.logger.info(f"  [METADATA] {len(metadata_by_file)} files → {metadata_file}")
+
+            if quit_requested:
+                return True
+
+            remove_checkpoint(self.checkpoint_path)
 
             duration = time.time() - self.start_time
             duration_str = f"{int(duration // 60)} minutes {int(duration % 60)} seconds"
@@ -608,3 +699,5 @@ class LocalAnalyzer:
             import traceback
             traceback.print_exc()
             return False
+        finally:
+            self.pause_handler.restore()

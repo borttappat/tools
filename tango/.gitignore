@@ -29,6 +29,10 @@ tango_*_*.log
 local_keywords_*.txt
 smb_keywords_*.txt
 
+# Pause/resume checkpoints
+smb_checkpoint_*.json
+local_checkpoint_*.json
+
 # IDE and editor files
 .vscode/
 .idea/

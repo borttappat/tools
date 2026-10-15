@@ -38,6 +38,12 @@ Examples:
   # Local: search indexed local files
   tango local-talk /mnt/fileserver/dump --filetypes pdf,docx,xlsx,txt
   tango local-talk /mnt/fileserver/dump --keywords-inline password,secret,token
+
+  # Pausing and resuming (talk / local-talk only)
+  # Ctrl+C pauses with a resume/quit prompt; killing the process is also
+  # safe. Rerunning the exact same command auto-resumes from a checkpoint.
+  tango local-talk /mnt/fileserver/dump --filetypes pdf,docx,xlsx,txt
+  tango local-talk /mnt/fileserver/dump --filetypes pdf,docx,xlsx,txt --fresh  # ignore checkpoint, start over
         """
     )
 
@@ -74,6 +80,8 @@ Examples:
                              help='Override 50MB limit (in MB, or "unlimited")')
     talk_parser.add_argument('--metadata', action='store_true',
                              help='Extract embedded file metadata (author, GPS, software, timestamps) via ExifTool')
+    talk_parser.add_argument('--fresh', action='store_true',
+                             help='Discard any paused session for this target and start over')
 
     # ------------------------------------------------------------------
     # local-walk subcommand
@@ -100,6 +108,8 @@ Examples:
                            help='Override 50MB per-file limit (in MB, or "unlimited")')
     lt_parser.add_argument('--metadata', action='store_true',
                            help='Extract embedded file metadata (author, GPS, software, timestamps) via ExifTool')
+    lt_parser.add_argument('--fresh', action='store_true',
+                           help='Discard any paused session for this path and start over')
 
     # ------------------------------------------------------------------
     # Global args for SMB auto-detect mode
@@ -117,6 +127,8 @@ Examples:
     parser.add_argument('--override-filesize', help='Override file size limit')
     parser.add_argument('--metadata', action='store_true',
                         help='Extract embedded file metadata (author, GPS, software, timestamps) via ExifTool')
+    parser.add_argument('--fresh', action='store_true',
+                        help='Discard any paused session for this target and start over')
     parser.add_argument('--version', action='version', version=f'Tango {VERSION}')
 
     args = parser.parse_args()
@@ -205,7 +217,8 @@ def _run_talk(args):
             keywords_inline=getattr(args, 'keywords_inline', None),
             keywords_saved=getattr(args, 'keywords_saved', False),
             override_filesize=getattr(args, 'override_filesize', None),
-            metadata_enabled=getattr(args, 'metadata', False)
+            metadata_enabled=getattr(args, 'metadata', False),
+            fresh=getattr(args, 'fresh', False)
         )
         if not talker.talk():
             sys.exit(1)
@@ -254,7 +267,8 @@ def _run_local_talk(args):
             keywords_inline=getattr(args, 'keywords_inline', None),
             keywords_saved=getattr(args, 'keywords_saved', False),
             override_filesize=getattr(args, 'override_filesize', None),
-            metadata_enabled=getattr(args, 'metadata', False)
+            metadata_enabled=getattr(args, 'metadata', False),
+            fresh=getattr(args, 'fresh', False)
         )
         if not analyzer.analyze():
             sys.exit(1)

@@ -178,6 +178,28 @@ see what file types exist and how large they are, then pick what to search.
 
 ---
 
+## Pausing and resuming
+
+`talk` and `local-talk` can run for a long time against a large share or
+dump folder. Both support pausing and resuming:
+
+- **Ctrl+C** pauses after the current file finishes and prompts
+  `[r]esume, [q]uit and save progress`. Choosing `r` continues in the same
+  run; `q` exits cleanly. A **second** Ctrl+C while that prompt is up force-
+  quits immediately.
+- Progress is checkpointed to disk after every file, so killing the process
+  outright (closed terminal, `kill -9`, VM reboot) is also safe - nothing
+  needs to be downloaded or searched twice.
+- Rerunning the **exact same command** auto-detects the checkpoint and
+  resumes, using the original run's file types and keywords, and folds
+  previously-found matches back into the final `RESULTS.txt`/`METADATA.txt`.
+- Pass `--fresh` to discard an existing checkpoint and start over instead.
+
+Checkpoints (`smb_checkpoint_<ip>.json` / `local_checkpoint_<name>.json`) are
+deleted automatically once a run finishes all selected file types.
+
+---
+
 ## Output files
 
 ### SMB mode
@@ -187,6 +209,7 @@ see what file types exist and how large they are, then pick what to search.
 | `smb_index_<ip>.txt` | Human-readable share index |
 | `smb_index_<ip>.json` | Machine-readable index (used by talk phase) |
 | `large_files_<ip>.txt` | Files over 50 MB, flagged for manual review |
+| `smb_checkpoint_<ip>.json` | Resume point for a paused/interrupted talk run (deleted on completion) |
 | `downloads_<ip>/by_type/<ext>/RESULTS.txt` | Keyword matches per file type |
 | `downloads_<ip>/by_type/<ext>/METADATA.txt` | Embedded file metadata (with `--metadata`) |
 | `downloads_<ip>/by_type/<ext>/METADATA.json` | Same, machine-readable |
@@ -198,6 +221,7 @@ see what file types exist and how large they are, then pick what to search.
 |------|----------|
 | `local_index_<name>.txt` | Human-readable directory index |
 | `local_index_<name>.json` | Machine-readable index (used by local-talk) |
+| `local_checkpoint_<name>.json` | Resume point for a paused/interrupted local-talk run (deleted on completion) |
 | `local_results_<name>/by_type/<ext>/RESULTS.txt` | Keyword matches per file type |
 | `local_results_<name>/by_type/<ext>/METADATA.txt` | Embedded file metadata (with `--metadata`) |
 | `local_results_<name>/by_type/<ext>/METADATA.json` | Same, machine-readable |
