@@ -1,15 +1,15 @@
 #!@bash@
-# termrec: record every interactive terminal with asciinema, name the sessions,
+# cashe: record every interactive terminal with asciinema, name the sessions,
 # and read them back as plain text.
 #
-# A shell's init snippet (`termrec init bash|zsh|fish`) execs `termrec session`
+# A shell's init snippet (`cashe init bash|zsh|fish`) execs `cashe session`
 # when an interactive terminal opens. That runs asciinema around a fresh copy of
-# the shell, which sees $TERMREC and does not record again. On exit the .cast is
+# the shell, which sees $CASHE and does not record again. On exit the .cast is
 # rendered to a plain-text twin (.txt) with `asciinema convert`, which emulates a
 # terminal, so prompt and line-editing redraws come out as a readable transcript.
 #
-# The current session's path lives in a state file ($TERMREC_STATE), not in the
-# shell's environment, so `termrec -r` can rename a live recording (asciinema
+# The current session's path lives in a state file ($CASHE_STATE), not in the
+# shell's environment, so `cashe -r` can rename a live recording (asciinema
 # keeps writing through its open descriptor) and every later lookup, including
 # the final conversion, follows the new name.
 set -euo pipefail
@@ -18,10 +18,10 @@ set -euo pipefail
 orig_path=$PATH
 export PATH="@path@:$PATH"
 share="@share@"
-dir=${TERMREC_DIR:-$HOME/terminal_logs}
+dir=${CASHE_DIR:-$HOME/terminal_logs}
 
 die() {
-  echo "termrec: $*" >&2
+  echo "cashe: $*" >&2
   exit 1
 }
 
@@ -32,7 +32,7 @@ stem() {
 }
 
 current() {
-  [ -n "${TERMREC_STATE:-}" ] && [ -s "$TERMREC_STATE" ] && head -n1 -- "$TERMREC_STATE"
+  [ -n "${CASHE_STATE:-}" ] && [ -s "$CASHE_STATE" ] && head -n1 -- "$CASHE_STATE"
 }
 
 # Sessions oldest first, one path per line.
@@ -89,7 +89,7 @@ find_session() {
     1) printf '%s\n' "${hits[0]}" ;;
     0) die "no session matching '$arg'" ;;
     *)
-      echo "termrec: '$arg' matches several sessions:" >&2
+      echo "cashe: '$arg' matches several sessions:" >&2
       for f in "${hits[@]}"; do echo "  $(stem "$f")" >&2; done
       exit 1
       ;;
@@ -97,26 +97,26 @@ find_session() {
 }
 
 cmd_session() {
-  TERMREC_SHELL=${TERMREC_SHELL:-${SHELL:-sh}}
+  CASHE_SHELL=${CASHE_SHELL:-${SHELL:-sh}}
   mkdir -p -- "$dir"
   local id run rc=0 cast asciinema
   id=$(date +%Y%m%d-%H%M%S)-$(od -An -N3 -tx1 /dev/urandom | tr -d ' \n')
   run=${XDG_RUNTIME_DIR:-/tmp}
-  export TERMREC=1 TERMREC_SHELL TERMREC_DIR=$dir
-  export TERMREC_FILE="$dir/$id.cast"
-  export TERMREC_STATE="$run/termrec-$id" TERMREC_STOP="$run/termrec-$id.stop"
-  printf '%s\n' "$TERMREC_FILE" >"$TERMREC_STATE"
+  export CASHE=1 CASHE_SHELL CASHE_DIR=$dir
+  export CASHE_FILE="$dir/$id.cast"
+  export CASHE_STATE="$run/cashe-$id" CASHE_STOP="$run/cashe-$id.stop"
+  printf '%s\n' "$CASHE_FILE" >"$CASHE_STATE"
   asciinema=$(command -v asciinema)
-  PATH=$orig_path "$asciinema" rec --quiet -c "$TERMREC_SHELL" "$TERMREC_FILE" || rc=$?
+  PATH=$orig_path "$asciinema" rec --quiet -c "$CASHE_SHELL" "$CASHE_FILE" || rc=$?
   cast=$(current)
-  rm -f -- "$TERMREC_STATE"
+  rm -f -- "$CASHE_STATE"
   "$asciinema" convert --overwrite -f txt "$cast" "${cast%.cast}.txt" 2>/dev/null || true
   # stop-recording left a sentinel: continue in a plain, unrecorded shell
-  # rather than closing the terminal. TERMREC stays set so it doesn't record.
-  if [ -e "$TERMREC_STOP" ]; then
-    rm -f -- "$TERMREC_STOP"
-    unset TERMREC_FILE TERMREC_STATE TERMREC_STOP
-    PATH=$orig_path exec sh -c "exec $TERMREC_SHELL"
+  # rather than closing the terminal. CASHE stays set so it doesn't record.
+  if [ -e "$CASHE_STOP" ]; then
+    rm -f -- "$CASHE_STOP"
+    unset CASHE_FILE CASHE_STATE CASHE_STOP
+    PATH=$orig_path exec sh -c "exec $CASHE_SHELL"
   fi
   exit "$rc"
 }
@@ -150,13 +150,13 @@ cmd_rename() {
   cur=$(current) || die "not recording"
   name=${1:-}
   name=${name%.cast}
-  [[ $name =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "usage: termrec -r NAME  (letters, digits, . _ -)"
+  [[ $name =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "usage: cashe -r NAME  (letters, digits, . _ -)"
   new="$(dirname -- "$cur")/$name.cast"
   [ "$new" = "$cur" ] && return 0
   [ -e "$new" ] || [ -e "${new%.cast}.txt" ] && die "'$name' already exists"
   mv -n -- "$cur" "$new"
   [ -e "$cur" ] && die "could not rename $cur"
-  printf '%s\n' "$new" >"$TERMREC_STATE"
+  printf '%s\n' "$new" >"$CASHE_STATE"
   echo "Recording renamed: $name"
 }
 
@@ -165,7 +165,7 @@ cmd_print() {
   if [ $# -gt 0 ]; then
     f=$(find_session "$1")
   else
-    f=$(current) || die "not recording; name a session (termrec -l)"
+    f=$(current) || die "not recording; name a session (cashe -l)"
   fi
   # On a terminal, frame the transcript so it can't be mistaken for live prompts.
   # The text is taken before the header is printed, or a live session's render
@@ -192,15 +192,15 @@ cmd_init() {
   case ${1:-} in
     bash | zsh) cat -- "$share/init.sh" ;;
     fish) cat -- "$share/init.fish" ;;
-    *) die "usage: termrec init bash|zsh|fish" ;;
+    *) die "usage: cashe init bash|zsh|fish" ;;
   esac
 }
 
 usage() {
   cat <<EOF
-Usage: termrec [-c | -l | -r NAME | -p [SESSION] | -a]
-       termrec init bash|zsh|fish
-       termrec session
+Usage: cashe [-c | -l | -r NAME | -p [SESSION] | -a]
+       cashe init bash|zsh|fish
+       cashe session
 
   -c            show the current session (default)
   -l            list sessions, oldest first (* = this terminal)
@@ -210,11 +210,11 @@ Usage: termrec [-c | -l | -r NAME | -p [SESSION] | -a]
   -x            stop recording, keep the terminal open (recorded shells)
   -s            start a fresh recording (recorded shells)
   init SHELL    print the snippet that records every interactive terminal
-  session       record a session of \$TERMREC_SHELL (run by the snippet)
+  session       record a session of \$CASHE_SHELL (run by the snippet)
 
 SESSION is a name, a unique part of one, or a path.
-Recordings go to \$TERMREC_DIR (now: $dir).
-In a shell set up with \`termrec init\`, \`rec\` is short for termrec;
+Recordings go to \$CASHE_DIR (now: $dir).
+In a shell set up with \`cashe init\`, \`rec\` is short for cashe;
 -x and -s (also stop-recording / start-recording) only work there.
 EOF
 }

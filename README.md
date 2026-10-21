@@ -147,7 +147,7 @@ Then run `present talk.md` inside the shell. See `slides/README.md` for full usa
 
 ---
 
-## termrec
+## cashe
 
 Records every interactive terminal (bash, zsh, fish) with asciinema and writes
 a plain-text transcript when it closes. `rec -r NAME` names the running session;
@@ -156,18 +156,18 @@ a plain-text transcript when it closes. `rec -r NAME` names the running session;
 Try it in a clean shell, with recordings in a temporary directory:
 
 ```bash
-nix run "github:borttappat/tools?dir=termrec"
+nix run "github:borttappat/tools?dir=cashe"
 ```
 
 ```bash
-nix run "github:borttappat/tools?dir=termrec" -- fish
+nix run "github:borttappat/tools?dir=cashe" -- fish
 ```
 
 Or as a NixOS module:
 
 ```nix
-imports = [ inputs.termrec.nixosModules.default ];
-programs.termrec.enable = true;
+imports = [ inputs.cashe.nixosModules.default ];
+programs.cashe.enable = true;
 ```
 
-See `termrec/README.md` for full usage.
+See `cashe/README.md` for full usage.

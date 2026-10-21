@@ -6,9 +6,9 @@
 set -euo pipefail
 
 export PATH="@path@:$PATH"
-termrec="@termrec@"
+cashe="@cashe@"
 share="@share@"
-work=$(mktemp -d "${TMPDIR:-/tmp}/termrec-test.XXXXXX")
+work=$(mktemp -d "${TMPDIR:-/tmp}/cashe-test.XXXXXX")
 fails=0
 
 # Types each line into the session like a user would. "@wait" pauses long
@@ -61,12 +61,12 @@ run_shell() {
     "rec -p" "rec -x" "echo unrecorded-$calc" "rec" "rec -s" "@wait" \
     "echo second-$calc" "exit" |
     env -i HOME="$dir/home" PATH="$PATH" TERM=xterm-256color XDG_RUNTIME_DIR="$dir/rt" \
-      TERMREC_DIR="$dir/logs" TERMREC_SHELL="$cmd" ZDOTDIR="$dir/zdot" \
+      CASHE_DIR="$dir/logs" CASHE_SHELL="$cmd" ZDOTDIR="$dir/zdot" \
       fish_features=no-query-term \
-      timeout 60 script -qfec "stty cols 100 rows 30; $termrec session" /dev/null >"$dir/screen.log" 2>&1 || true
+      timeout 60 script -qfec "stty cols 100 rows 30; $cashe session" /dev/null >"$dir/screen.log" 2>&1 || true
 
   local t="$dir/logs/t-$sh.txt"
-  export TERMREC_DIR="$dir/logs"
+  export CASHE_DIR="$dir/logs"
   check "renamed recording and its text twin exist" "[ -f '$dir/logs/t-$sh.cast' ] && [ -f '$t' ]"
   check "transcript has output from before the rename" "grep -q '^hello-42' '$t'"
   check "transcript has output from after the rename" "grep -q '^after-rename' '$t'"
@@ -79,9 +79,9 @@ run_shell() {
   check "rec -s began a second session" \
     "grep -lq '^second-42' $dir/logs/*.txt && [ \$(ls $dir/logs/*.cast | wc -l) -eq 2 ]"
   check "session state files are cleaned up" "[ -z \"\$(ls -A '$dir/rt')\" ]"
-  check "rec -l lists the session" "'$termrec' -l | grep 't-$sh' >/dev/null"
-  check "rec -p prints the session" "'$termrec' -p t-$sh | grep '^after-rename' >/dev/null"
-  check "rec -a prints every session" "[ \$('$termrec' -a | grep -cE '^==> [A-Za-z0-9._-]+ <==\$') -eq 2 ]"
+  check "rec -l lists the session" "'$cashe' -l | grep 't-$sh' >/dev/null"
+  check "rec -p prints the session" "'$cashe' -p t-$sh | grep '^after-rename' >/dev/null"
+  check "rec -a prints every session" "[ \$('$cashe' -a | grep -cE '^==> [A-Za-z0-9._-]+ <==\$') -eq 2 ]"
 }
 
 for sh in "${@:-bash zsh fish}"; do
