@@ -144,3 +144,30 @@ nix run "github:borttappat/tools?dir=slides"
 ```
 
 Then run `present talk.md` inside the shell. See `slides/README.md` for full usage.
+
+---
+
+## termrec
+
+Records every interactive terminal (bash, zsh, fish) with asciinema and writes
+a plain-text transcript when it closes. `rec -r NAME` names the running session;
+`rec -l`, `rec -p` and `rec -a` list and print sessions.
+
+Try it in a clean shell, with recordings in a temporary directory:
+
+```bash
+nix run "github:borttappat/tools?dir=termrec"
+```
+
+```bash
+nix run "github:borttappat/tools?dir=termrec" -- fish
+```
+
+Or as a NixOS module:
+
+```nix
+imports = [ inputs.termrec.nixosModules.default ];
+programs.termrec.enable = true;
+```
+
+See `termrec/README.md` for full usage.
