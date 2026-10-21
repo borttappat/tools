@@ -11,18 +11,11 @@
     self,
     nixpkgs,
     flake-utils,
-  }:
-    flake-utils.lib.eachSystem ["x86_64-linux" "aarch64-linux"] (system: let
-      pkgs = nixpkgs.legacyPackages.${system};
-      inherit (pkgs) lib;
-
-      shells = {
-        bashInteractive = "${pkgs.bashInteractive}/bin/bash";
-        zsh = "${pkgs.zsh}/bin/zsh";
-        fish = "${pkgs.fish}/bin/fish";
-      };
-
-      termrec = pkgs.stdenvNoCC.mkDerivation {
+  }: let
+    # Built from whichever nixpkgs the caller uses (the NixOS module passes the
+    # system's own), so installing termrec adds no second nixpkgs to a closure.
+    mkTermrec = pkgs:
+      pkgs.stdenvNoCC.mkDerivation {
         pname = "termrec";
         version = "0.1.0";
         src = ./.;
@@ -32,7 +25,7 @@
           mkdir -p $out/bin $share
           substitute termrec.sh $out/bin/termrec \
             --subst-var-by bash ${pkgs.bash}/bin/bash \
-            --subst-var-by path ${lib.makeBinPath [pkgs.asciinema pkgs.coreutils]} \
+            --subst-var-by path ${pkgs.lib.makeBinPath [pkgs.asciinema pkgs.coreutils]} \
             --subst-var-by share $share
           chmod +x $out/bin/termrec
           for f in init.sh init.fish; do
@@ -48,9 +41,21 @@
         meta = {
           description = "Record every interactive terminal with asciinema; name sessions, read them back as text";
           mainProgram = "termrec";
-          platforms = lib.platforms.linux;
+          platforms = pkgs.lib.platforms.linux;
         };
       };
+  in
+    flake-utils.lib.eachSystem ["x86_64-linux" "aarch64-linux"] (system: let
+      pkgs = nixpkgs.legacyPackages.${system};
+      inherit (pkgs) lib;
+
+      shells = {
+        bashInteractive = "${pkgs.bashInteractive}/bin/bash";
+        zsh = "${pkgs.zsh}/bin/zsh";
+        fish = "${pkgs.fish}/bin/fish";
+      };
+
+      termrec = mkTermrec pkgs;
 
       # Fills the shell and termrec paths into a helper script.
       withPaths = name: file: extra:
@@ -121,7 +126,8 @@
           enable = lib.mkEnableOption "recording every interactive terminal with termrec";
           package = lib.mkOption {
             type = lib.types.package;
-            default = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
+            default = mkTermrec pkgs;
+            defaultText = lib.literalMD "termrec built from the system's nixpkgs (needs asciinema 3)";
             description = "The termrec package.";
           };
           dir = lib.mkOption {
